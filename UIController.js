@@ -226,6 +226,7 @@ export class UIController {
     this.dom.appMain.classList.remove("tuner--live");
     this.dom.stopBtn.hidden = true;
     this.dom.overlayBtn.textContent = "Tap to Start Tuner";
+    this.#setPerfectFeedback(false);
     this.#setSevenSegLetter("G", true);
   }
 
@@ -267,7 +268,10 @@ export class UIController {
     this.dom.statusLabel.textContent = statusText;
     this.dom.centsLabel.textContent = "—";
     this.dom.centsLabel.classList.remove("tuner__cents--perfect");
-    this.#setSevenSegLetter("G", false);
+    this.#setPerfectFeedback(false);
+    const selected = GUITAR_STRINGS.find((s) => s.id === this.#selectedStringId);
+    const letter = selected?.letter ?? "G";
+    this.#setSevenSegLetter(letter, false);
   }
 
   #isVoiceMode() {
@@ -390,6 +394,7 @@ export class UIController {
     const sign = rounded > 0 ? "+" : "";
     this.dom.centsLabel.classList.toggle("tuner__cents--perfect", showPerfect);
     this.dom.centsLabel.textContent = showPerfect ? "Perfect" : `${sign}${rounded}¢`;
+    this.#setPerfectFeedback(showPerfect);
   }
 
   /**
@@ -424,6 +429,13 @@ export class UIController {
       this.dom.statusLabel.textContent = `${frequency.toFixed(1)} Hz · ${noteName}${octave}`;
       this.dom.centsLabel.textContent = `${sign}${rounded}¢`;
     }
+    this.#setPerfectFeedback(showPerfect);
+  }
+
+  /** Full-screen + gauge feedback when pitch is within ±IN_TUNE_CENTS. */
+  #setPerfectFeedback(perfect) {
+    document.body.classList.toggle("perfect-tune", perfect);
+    this.dom.appMain.classList.toggle("tuner--perfect", perfect);
   }
 
   /**

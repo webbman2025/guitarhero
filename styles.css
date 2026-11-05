@@ -4,6 +4,7 @@
   --color-ui-bright: rgba(255, 255, 255, 0.62);
   --color-marker: #ffffff;
   --color-in-tune: #9dffb8;
+  --color-bg-in-tune: #0d7a45;
   --gauge-pivot-x: 195;
   --gauge-pivot-y: 168;
   --safe-top: env(safe-area-inset-top, 0px);
@@ -30,6 +31,11 @@ body {
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
   overflow: hidden;
+  transition: background-color 0.22s ease;
+}
+
+body.perfect-tune {
+  background: var(--color-bg-in-tune);
 }
 
 .dev-toggle {
@@ -283,6 +289,17 @@ body {
 .gauge__needle {
   fill: var(--color-ui-bright);
   opacity: 0.72;
+  transition: fill 0.22s ease;
+}
+
+.tuner--perfect .gauge__needle {
+  fill: var(--color-in-tune);
+  opacity: 1;
+}
+
+.tuner--perfect .gauge__marker,
+.tuner--perfect .gauge__pivot {
+  fill: var(--color-in-tune);
 }
 
 .gauge__pivot {
