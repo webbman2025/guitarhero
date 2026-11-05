@@ -411,12 +411,13 @@ export class UIController {
   }
 
   #applySimFrequency() {
-    if (this.#engine.simulateMode) {
-      this.#engine.setSimulatedFrequency(this.#simFrequencyForSelectedString(), {
-        pluck: true,
-        stringId: this.#selectedStringId,
-      });
+    if (!this.#engine.simulateMode || !this.#simStringEngaged) {
+      return;
     }
+    this.#engine.setSimulatedFrequency(this.#simFrequencyForSelectedString(), {
+      pluck: true,
+      stringId: this.#selectedStringId,
+    });
   }
 
   #shutdown() {
@@ -505,11 +506,13 @@ export class UIController {
 
   #resetSimNeedleIdle() {
     this.#simStringEngaged = false;
+    this.#manualString = false;
     this.#lastSimTapStringId = null;
     this.#simTapPhaseIndex = 0;
     this.#devSimCents = 0;
     this.dom.devSimCents.value = "0";
     this.dom.devSimCentsOut.textContent = "0";
+    this.#setActiveStringButton(null);
     this.#showIdleNeedle();
   }
 
@@ -594,20 +597,22 @@ export class UIController {
     this.#setTuningMode("guitar");
     this.#setSimulateEnabled(true);
     if (!this.dom.appMain.classList.contains("tuner--live")) {
-      if (!(await this.#tryStartTuner({ playDemoAudio: true }))) {
+      if (!(await this.#tryStartTuner({ playDemoAudio: false }))) {
         this.dom.devReadout.textContent = "Demo needs audio — tap Start on the main screen, then try again.";
         return;
       }
     } else {
-      await this.#restartAudio({ playDemoAudio: true });
+      await this.#restartAudio({ playDemoAudio: false });
     }
 
     this.#devDemoActive = true;
+    this.#engine.setPlayDemoAudio(false);
     this.#resetSimNeedleIdle();
     this.#syncDevDemoBtn();
     this.#closeDevMenu();
+    this.dom.statusLabel.textContent = "Tap a letter to begin";
     this.dom.devReadout.textContent =
-      "Demo — needle starts at the far left.\nTap a letter 3 times: flat → closer → PERFECT.";
+      "Demo — silent until you tap a letter.\nNeedle at the far left; tap 3 times: flat → closer → PERFECT.";
   }
 
   /** @param {string | null} stringId */
@@ -637,9 +642,17 @@ export class UIController {
     this.#manualString = true;
     this.#setActiveStringButton(stringId);
 
+    if (this.#devDemoActive) {
+      this.#engine.setPlayDemoAudio(true);
+    }
+
     if (this.#devSimulate || this.#devDemoActive) {
       this.#simStringEngaged = true;
       this.#applySimTapPhase(stringId);
+    }
+
+    if (this.#devDemoActive) {
+      this.dom.statusLabel.textContent = "";
     }
 
     if (this.#devSimulate && !this.#engine.isRunning) {
@@ -894,10 +907,13 @@ export class UIController {
     this.#setNeedleTransform(this.#needleDeg);
   }
 
-  /** @param {string} stringId */
+  /** @param {string | null} stringId */
   #setActiveStringButton(stringId) {
     for (const btn of this.dom.stringButtons) {
-      btn.classList.toggle("tuner__string--active", btn.getAttribute("data-string") === stringId);
+      btn.classList.toggle(
+        "tuner__string--active",
+        stringId != null && btn.getAttribute("data-string") === stringId,
+      );
     }
   }
 
