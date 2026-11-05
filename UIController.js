@@ -201,12 +201,29 @@ export class UIController {
   async #bootstrap() {
     await this.#watchMicPermission();
     if (await this.#shouldAutoStart()) {
+      this.#prepareAutoStartUi();
       if (await this.#tryStartTuner()) {
         return;
       }
+      this.#cancelAutoStartUi();
     }
     this.#revealStartOverlay();
     await this.#syncStartOverlayCopy();
+  }
+
+  /** Mic already allowed — skip "Tap to start" flash while getUserMedia runs. */
+  #prepareAutoStartUi() {
+    document.documentElement.classList.add("mic-granted-boot");
+    this.dom.overlay.classList.add("start-overlay--hidden");
+    this.dom.appMain.setAttribute("aria-hidden", "false");
+    this.dom.appMain.classList.add("tuner--live");
+  }
+
+  #cancelAutoStartUi() {
+    document.documentElement.classList.remove("mic-granted-boot");
+    this.dom.appMain.classList.remove("tuner--live");
+    this.dom.appMain.setAttribute("aria-hidden", "true");
+    this.dom.stopBtn.hidden = true;
   }
 
   async #shouldAutoStart() {
@@ -220,9 +237,11 @@ export class UIController {
     if (this.dom.appMain.classList.contains("tuner--live")) {
       return;
     }
+    this.#prepareAutoStartUi();
     if (await this.#tryStartTuner()) {
       return;
     }
+    this.#cancelAutoStartUi();
     this.#revealStartOverlay();
     await this.#syncStartOverlayCopy();
   }
