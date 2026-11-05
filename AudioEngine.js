@@ -32,6 +32,15 @@ export class AudioEngine {
     );
   }
 
+  /** Mic/sim graph still open (e.g. background suspend — do not re-prompt). */
+  get hasActiveSession() {
+    return (
+      this.#context != null &&
+      this.#context.state !== "closed" &&
+      (this.#stream != null || this.#simulateMode)
+    );
+  }
+
   get simulateMode() {
     return this.#simulateMode;
   }
@@ -93,6 +102,18 @@ export class AudioEngine {
     }
 
     await this.#context.resume();
+  }
+
+  async suspend() {
+    if (this.#context?.state === "running") {
+      await this.#context.suspend();
+    }
+  }
+
+  async resume() {
+    if (this.#context?.state === "suspended") {
+      await this.#context.resume();
+    }
   }
 
   /** @param {number} frequency */

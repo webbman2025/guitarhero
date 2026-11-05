@@ -32,6 +32,7 @@ const CENTS_SPAN = 50;
 const NEEDLE_PIVOT_X = 195;
 const NEEDLE_PIVOT_Y = 168;
 const GAUGE_RADIUS = 147;
+const MIC_GRANTED_STORAGE_KEY = "guitar_tuner_mic_granted";
 
 export class UIController {
   /** @type {AudioEngine} */
@@ -54,11 +55,14 @@ export class UIController {
   #tuningMode = "guitar";
   /** @type {number} */
   #devSimCents = 0;
+  /** @type {boolean} */
+  #resumeAfterBackground = false;
 
   /**
    * @param {{
    *   overlay: HTMLElement,
    *   overlayBtn: HTMLButtonElement,
+   *   overlayHint: HTMLElement,
    *   appMain: HTMLElement,
    *   stopBtn: HTMLButtonElement,
    *   devToggle: HTMLButtonElement,
@@ -87,6 +91,8 @@ export class UIController {
     this.#setSevenSegLetter("G", true);
     document.body.classList.add("mode-guitar");
     this.#bindEvents();
+    void this.#syncStartOverlayCopy();
+    void this.#watchMicPermission();
   }
 
   #bindEvents() {
@@ -153,10 +159,106 @@ export class UIController {
     }
 
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden && this.#engine.isRunning) {
-        this.#shutdown();
+      if (document.hidden) {
+        void this.#pauseForBackground();
+      } else {
+        void this.#resumeFromBackground();
       }
     });
+
+    window.addEventListener("pageshow", (event) => {
+      if (event.persisted) {
+        void this.#resumeFromBackground();
+      }
+    });
+  }
+
+  async #micLooksGranted() {
+    if (localStorage.getItem(MIC_GRANTED_STORAGE_KEY) === "1") {
+      return true;
+    }
+    if (!navigator.permissions?.query) {
+      return false;
+    }
+    try {
+      const status = await navigator.permissions.query({ name: "microphone" });
+      return status.state === "granted";
+    } catch {
+      return false;
+    }
+  }
+
+  async #watchMicPermission() {
+    if (!navigator.permissions?.query) {
+      return;
+    }
+    try {
+      const status = await navigator.permissions.query({ name: "microphone" });
+      status.onchange = () => {
+        void this.#syncStartOverlayCopy();
+      };
+    } catch {
+      /* Permissions API unsupported for microphone */
+    }
+  }
+
+  async #syncStartOverlayCopy() {
+    if (this.#devSimulate) {
+      this.dom.overlayBtn.textContent = "Tap to start (simulated)";
+      this.dom.overlayHint.hidden = true;
+      this.dom.overlayHint.textContent = "";
+      return;
+    }
+    const granted = await this.#micLooksGranted();
+    if (granted) {
+      this.dom.overlayBtn.textContent = "Tap to listen";
+      this.dom.overlayHint.hidden = false;
+      this.dom.overlayHint.textContent =
+        "Microphone is already allowed for this site. You should not see the Allow prompt again.";
+    } else {
+      this.dom.overlayBtn.textContent = "Tap to Start Tuner";
+      this.dom.overlayHint.hidden = false;
+      this.dom.overlayHint.textContent =
+        "First time only: your browser will ask to use the microphone. Choose Allow.";
+    }
+  }
+
+  #rememberMicGranted() {
+    if (!this.#devSimulate) {
+      localStorage.setItem(MIC_GRANTED_STORAGE_KEY, "1");
+    }
+  }
+
+  async #pauseForBackground() {
+    if (!this.#engine.hasActiveSession || !this.dom.appMain.classList.contains("tuner--live")) {
+      return;
+    }
+    this.#resumeAfterBackground = true;
+    cancelAnimationFrame(this.#rafId);
+    this.#rafId = 0;
+    await this.#engine.suspend();
+  }
+
+  async #resumeFromBackground() {
+    if (!this.#resumeAfterBackground || !this.#engine.hasActiveSession) {
+      return;
+    }
+    if (!this.dom.appMain.classList.contains("tuner--live")) {
+      this.#resumeAfterBackground = false;
+      return;
+    }
+    try {
+      await this.#engine.resume();
+      this.#resumeAfterBackground = false;
+      if (!this.#rafId) {
+        this.#rafId = requestAnimationFrame(() => this.#frame());
+      }
+    } catch (err) {
+      console.error(err);
+      this.#resumeAfterBackground = false;
+      this.#shutdown();
+      this.dom.overlayBtn.textContent = "Tap to listen";
+    }
   }
 
   async #onStartTap() {
@@ -174,11 +276,17 @@ export class UIController {
       if (!this.#rafId) {
         this.#rafId = requestAnimationFrame(() => this.#frame());
       }
+      this.#rememberMicGranted();
+      void this.#syncStartOverlayCopy();
     } catch (err) {
       console.error(err);
       this.dom.overlayBtn.textContent = this.#devSimulate
         ? "Audio failed — try again"
         : "Microphone blocked — try again";
+      this.dom.overlayHint.hidden = false;
+      this.dom.overlayHint.textContent = this.#devSimulate
+        ? ""
+        : "Check Settings → your browser → Microphone, then try again.";
     }
   }
 
@@ -211,6 +319,7 @@ export class UIController {
   }
 
   #shutdown() {
+    this.#resumeAfterBackground = false;
     this.#engine.stop();
     cancelAnimationFrame(this.#rafId);
     this.#rafId = 0;
@@ -225,7 +334,7 @@ export class UIController {
     this.dom.appMain.setAttribute("aria-hidden", "true");
     this.dom.appMain.classList.remove("tuner--live");
     this.dom.stopBtn.hidden = true;
-    this.dom.overlayBtn.textContent = "Tap to Start Tuner";
+    void this.#syncStartOverlayCopy();
     this.#setPerfectFeedback(false);
     this.#setSevenSegLetter("G", true);
   }
@@ -307,6 +416,9 @@ export class UIController {
     this.#devSimulate = enabled;
     this.dom.devSimulateBtn.setAttribute("aria-pressed", String(enabled));
     this.dom.devExtra.hidden = !enabled;
+    if (!this.dom.appMain.classList.contains("tuner--live")) {
+      void this.#syncStartOverlayCopy();
+    }
   }
 
   /** @param {"guitar" | "voice"} mode */
@@ -516,6 +628,7 @@ export class UIController {
 
 const overlay = document.getElementById("start-overlay");
 const overlayBtn = document.getElementById("start-overlay-btn");
+const overlayHint = document.getElementById("start-overlay-hint");
 const appMain = document.getElementById("app-main");
 const stopBtn = document.getElementById("stop-btn");
 const devToggle = document.getElementById("dev-toggle");
@@ -540,6 +653,7 @@ const segElements = [...document.querySelectorAll(".seven-seg__seg")];
 if (
   !(overlay instanceof HTMLElement) ||
   !(overlayBtn instanceof HTMLButtonElement) ||
+  !(overlayHint instanceof HTMLElement) ||
   !(appMain instanceof HTMLElement) ||
   !(stopBtn instanceof HTMLButtonElement) ||
   !(devToggle instanceof HTMLButtonElement) ||
@@ -567,6 +681,7 @@ if (
 new UIController({
   overlay,
   overlayBtn,
+  overlayHint,
   appMain,
   stopBtn,
   devToggle,

@@ -189,8 +189,11 @@ body.perfect-tune {
   position: fixed;
   inset: 0;
   z-index: 20;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
   padding: calc(var(--safe-top) + 1rem) var(--safe-x) calc(var(--safe-bottom) + 1rem);
   background: var(--color-bg);
   transition: opacity 0.3s ease, visibility 0.3s ease;
@@ -200,6 +203,15 @@ body.perfect-tune {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
+}
+
+.start-overlay__hint {
+  margin: 0;
+  max-width: min(100%, 300px);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  text-align: center;
+  color: var(--color-ui-bright);
 }
 
 .start-overlay__btn {
