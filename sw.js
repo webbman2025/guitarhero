@@ -1,0 +1,104 @@
+/**
+ * Bump VERSION on each release that should refresh cached files.
+ * Install does not skipWaiting — updates apply on next full app open by default.
+ */
+const VERSION = "1";
+
+const CACHE = `guitarhero-static-${VERSION}`;
+
+const PRECACHE = [
+  "/",
+  "/index.html",
+  "/styles.css",
+  "/AudioEngine.js",
+  "/UIController.js",
+  "/pwa.js",
+  "/manifest.webmanifest",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
+  "/icons/apple-touch-icon.png",
+];
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    caches.open(CACHE).then((cache) =>
+      cache.addAll(PRECACHE).catch((err) => {
+        console.warn("precache partial fail", err);
+      }),
+    ),
+  );
+  // Stay in "waiting" until all tabs close (next open) or user taps Reload in the app.
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches
+      .keys()
+      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))
+      .then(() => self.clients.claim()),
+  );
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
+});
+
+self.addEventListener("fetch", (event) => {
+  if (event.request.method !== "GET") {
+    return;
+  }
+
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+
+  if (url.pathname === "/sw.js") {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+
+  event.respondWith(handleFetch(event.request));
+});
+
+/**
+ * @param {Request} request
+ */
+async function handleFetch(request) {
+  const cache = await caches.open(CACHE);
+
+  if (request.mode === "navigate") {
+    try {
+      const fresh = await fetch(request);
+      if (fresh.ok) {
+        await cache.put("/index.html", fresh.clone());
+      }
+      return fresh;
+    } catch {
+      return (await cache.match("/index.html")) || (await cache.match("/")) || offlineResponse();
+    }
+  }
+
+  const cached = await cache.match(request);
+  try {
+    const fresh = await fetch(request);
+    if (fresh.ok) {
+      await cache.put(request, fresh.clone());
+    }
+    return fresh;
+  } catch {
+    if (cached) {
+      return cached;
+    }
+    return offlineResponse();
+  }
+}
+
+function offlineResponse() {
+  return new Response("Offline — open the tuner once online to cache it.", {
+    status: 503,
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
+  });
+}

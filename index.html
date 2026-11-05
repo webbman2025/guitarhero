@@ -4,8 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Tuner" />
   <meta name="theme-color" content="#0066FF" />
   <title>Guitar Tuner</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
   <link rel="stylesheet" href="styles.css" />
   <script>
     (function () {
@@ -113,6 +116,15 @@
     </nav>
   </main>
 
+  <div class="pwa-update" id="pwa-update" hidden role="region" aria-label="App update">
+    <p class="pwa-update__text">New version available</p>
+    <div class="pwa-update__actions">
+      <button type="button" class="pwa-update__btn" id="pwa-update-btn">Reload</button>
+      <button type="button" class="pwa-update__dismiss" id="pwa-update-dismiss">Later</button>
+    </div>
+  </div>
+
+  <script src="pwa.js" defer></script>
   <script type="module" src="UIController.js"></script>
 </body>
 </html>

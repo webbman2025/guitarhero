@@ -16,3 +16,9 @@ npx serve .
 ```
 
 Open via HTTPS or `localhost` for microphone access.
+
+## PWA (offline + updates)
+
+Install via **Add to Home Screen** after one online visit. Cached assets work offline; tuning stays on-device.
+
+On deploy, bump `VERSION` in `sw.js`. New service workers **wait** until the app is fully closed (**update on next open**) or the user taps **Reload** on the optional update bar.
