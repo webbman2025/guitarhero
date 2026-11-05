@@ -9,6 +9,27 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <button type="button" class="dev-toggle" id="dev-toggle" aria-expanded="false" aria-controls="dev-panel">
+    Dev
+  </button>
+  <aside class="dev-panel" id="dev-panel" hidden>
+    <p class="dev-panel__title">Developer</p>
+    <label class="dev-panel__row">
+      <input type="checkbox" id="dev-simulate" />
+      Simulate tone (no guitar)
+    </label>
+    <label class="dev-panel__row">
+      <input type="checkbox" id="dev-voice-debug" checked />
+      Voice debug (hum / sing into mic)
+    </label>
+    <label class="dev-panel__row dev-panel__row--slider">
+      <span>Sim detune (¢)</span>
+      <input type="range" id="dev-sim-cents" min="-25" max="25" value="0" />
+      <output id="dev-sim-cents-out">0</output>
+    </label>
+    <pre class="dev-panel__readout" id="dev-readout" aria-live="polite">Dev off</pre>
+  </aside>
+
   <div class="start-overlay" id="start-overlay">
     <button type="button" class="start-overlay__btn" id="start-overlay-btn">
       Tap to Start Tuner

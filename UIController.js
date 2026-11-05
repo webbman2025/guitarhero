@@ -41,6 +41,14 @@ export class UIController {
   #selectedStringId = "G3";
   /** @type {boolean} */
   #manualString = false;
+  /** @type {boolean} */
+  #devOpen = false;
+  /** @type {boolean} */
+  #devSimulate = false;
+  /** @type {boolean} */
+  #devVoiceDebug = true;
+  /** @type {number} */
+  #devSimCents = 0;
 
   /**
    * @param {{
@@ -48,6 +56,13 @@ export class UIController {
    *   overlayBtn: HTMLButtonElement,
    *   appMain: HTMLElement,
    *   stopBtn: HTMLButtonElement,
+   *   devToggle: HTMLButtonElement,
+   *   devPanel: HTMLElement,
+   *   devSimulate: HTMLInputElement,
+   *   devVoiceDebug: HTMLInputElement,
+   *   devSimCents: HTMLInputElement,
+   *   devSimCentsOut: HTMLOutputElement,
+   *   devReadout: HTMLElement,
    *   noteDisplay: HTMLElement,
    *   segElements: SVGRectElement[],
    *   centsLabel: HTMLElement,
@@ -65,6 +80,31 @@ export class UIController {
   }
 
   #bindEvents() {
+    this.dom.devToggle.addEventListener("click", () => {
+      this.#devOpen = !this.#devOpen;
+      this.dom.devPanel.hidden = !this.#devOpen;
+      this.dom.devToggle.classList.toggle("dev-toggle--open", this.#devOpen);
+      this.dom.devToggle.setAttribute("aria-expanded", String(this.#devOpen));
+      this.#updateDevReadout("Dev panel open");
+    });
+
+    this.dom.devSimulate.addEventListener("change", () => {
+      this.#devSimulate = this.dom.devSimulate.checked;
+      if (this.#engine.isRunning) {
+        void this.#restartAudio();
+      }
+    });
+
+    this.dom.devVoiceDebug.addEventListener("change", () => {
+      this.#devVoiceDebug = this.dom.devVoiceDebug.checked;
+    });
+
+    this.dom.devSimCents.addEventListener("input", () => {
+      this.#devSimCents = Number(this.dom.devSimCents.value);
+      this.dom.devSimCentsOut.textContent = String(this.#devSimCents);
+      this.#applySimFrequency();
+    });
+
     this.dom.overlayBtn.addEventListener("click", () => {
       void this.#onStartTap();
     });
@@ -84,6 +124,7 @@ export class UIController {
         if (match) {
           this.#setSevenSegLetter(match.letter, true);
         }
+        this.#applySimFrequency();
       });
     }
 
@@ -97,7 +138,11 @@ export class UIController {
   async #onStartTap() {
     try {
       this.#manualString = false;
-      await this.#engine.start();
+      this.#devSimulate = this.dom.devSimulate.checked;
+      await this.#engine.start({
+        simulate: this.#devSimulate,
+        frequency: this.#simFrequencyForSelectedString(),
+      });
       this.dom.overlay.classList.add("start-overlay--hidden");
       this.dom.appMain.setAttribute("aria-hidden", "false");
       this.dom.appMain.classList.add("tuner--live");
@@ -108,7 +153,37 @@ export class UIController {
       }
     } catch (err) {
       console.error(err);
-      this.dom.overlayBtn.textContent = "Microphone blocked — try again";
+      this.dom.overlayBtn.textContent = this.#devSimulate
+        ? "Audio failed — try again"
+        : "Microphone blocked — try again";
+    }
+  }
+
+  async #restartAudio() {
+    const wasLive = this.#engine.isRunning;
+    this.#engine.stop();
+    if (!wasLive) {
+      return;
+    }
+    try {
+      await this.#engine.start({
+        simulate: this.#devSimulate,
+        frequency: this.#simFrequencyForSelectedString(),
+      });
+    } catch (err) {
+      console.error(err);
+      this.#updateDevReadout("Restart failed — tap Stop then Start");
+    }
+  }
+
+  #simFrequencyForSelectedString() {
+    const target = GUITAR_STRINGS.find((s) => s.id === this.#selectedStringId) ?? GUITAR_STRINGS[3];
+    return target.hz * 2 ** (this.#devSimCents / 1200);
+  }
+
+  #applySimFrequency() {
+    if (this.#engine.simulateMode) {
+      this.#engine.setSimulatedFrequency(this.#simFrequencyForSelectedString());
     }
   }
 
@@ -138,14 +213,26 @@ export class UIController {
       const buffer = this.#engine.readTimeDomainBuffer();
       if (buffer) {
         const result = this.#engine.detectPitch(buffer);
+        if (this.#devOpen) {
+          this.#updateDevReadoutFromResult(result, buffer);
+        }
+
         if (result === false) {
-          this.dom.statusLabel.textContent = "";
-          this.dom.centsLabel.textContent = "";
-          this.dom.centsLabel.classList.remove("tuner__cents--perfect");
+          if (!this.#devVoiceDebug || !this.#devOpen) {
+            this.dom.statusLabel.textContent = "";
+            this.dom.centsLabel.textContent = "";
+            this.dom.centsLabel.classList.remove("tuner__cents--perfect");
+          } else {
+            this.dom.statusLabel.textContent = "Voice: too quiet";
+          }
         } else if (result.confidence < CONFIDENCE_MIN) {
-          this.dom.statusLabel.textContent = "";
-          this.dom.centsLabel.textContent = "";
-          this.dom.centsLabel.classList.remove("tuner__cents--perfect");
+          if (this.#devVoiceDebug && this.#devOpen) {
+            this.dom.statusLabel.textContent = "Voice: keep humming…";
+          } else {
+            this.dom.statusLabel.textContent = "";
+            this.dom.centsLabel.textContent = "";
+            this.dom.centsLabel.classList.remove("tuner__cents--perfect");
+          }
         } else {
           this.#applyTuning(result.frequency);
         }
@@ -154,6 +241,32 @@ export class UIController {
 
     this.#smoothNeedle();
     this.#rafId = requestAnimationFrame(() => this.#frame());
+  }
+
+  /** @param {string} message */
+  #updateDevReadout(message) {
+    if (!this.#devOpen) {
+      return;
+    }
+    this.dom.devReadout.textContent = message;
+  }
+
+  /**
+   * @param {false | { frequency: number, confidence: number, rms: number }} result
+   * @param {Float32Array} buffer
+   */
+  #updateDevReadoutFromResult(result, buffer) {
+    const rms = AudioEngine.computeRms(buffer);
+    const mode = this.#engine.simulateMode ? "simulate" : "mic";
+    if (result === false) {
+      this.dom.devReadout.textContent =
+        `mode: ${mode}\nrms: ${rms.toFixed(4)} (gate 0.015)\npitch: —\n` +
+        (mode === "mic" ? "tip: hum one note steadily" : "tip: enable Simulate tone");
+      return;
+    }
+    this.dom.devReadout.textContent =
+      `mode: ${mode}\nrms: ${result.rms.toFixed(4)}\n` +
+      `Hz: ${result.frequency.toFixed(2)}\nconf: ${result.confidence.toFixed(3)}`;
   }
 
   /** @param {number} frequency */
@@ -268,6 +381,13 @@ const overlay = document.getElementById("start-overlay");
 const overlayBtn = document.getElementById("start-overlay-btn");
 const appMain = document.getElementById("app-main");
 const stopBtn = document.getElementById("stop-btn");
+const devToggle = document.getElementById("dev-toggle");
+const devPanel = document.getElementById("dev-panel");
+const devSimulate = document.getElementById("dev-simulate");
+const devVoiceDebug = document.getElementById("dev-voice-debug");
+const devSimCents = document.getElementById("dev-sim-cents");
+const devSimCentsOut = document.getElementById("dev-sim-cents-out");
+const devReadout = document.getElementById("dev-readout");
 const noteDisplay = document.getElementById("seven-seg");
 const centsLabel = document.getElementById("cents-label");
 const statusLabel = document.getElementById("status-label");
@@ -281,6 +401,13 @@ if (
   !(overlayBtn instanceof HTMLButtonElement) ||
   !(appMain instanceof HTMLElement) ||
   !(stopBtn instanceof HTMLButtonElement) ||
+  !(devToggle instanceof HTMLButtonElement) ||
+  !(devPanel instanceof HTMLElement) ||
+  !(devSimulate instanceof HTMLInputElement) ||
+  !(devVoiceDebug instanceof HTMLInputElement) ||
+  !(devSimCents instanceof HTMLInputElement) ||
+  !(devSimCentsOut instanceof HTMLOutputElement) ||
+  !(devReadout instanceof HTMLElement) ||
   !(noteDisplay instanceof SVGSVGElement) ||
   !(centsLabel instanceof HTMLElement) ||
   !(statusLabel instanceof HTMLElement) ||
@@ -297,6 +424,13 @@ new UIController({
   overlayBtn,
   appMain,
   stopBtn,
+  devToggle,
+  devPanel,
+  devSimulate,
+  devVoiceDebug,
+  devSimCents,
+  devSimCentsOut,
+  devReadout,
   noteDisplay,
   segElements,
   centsLabel,

@@ -32,6 +32,81 @@ body {
   overflow: hidden;
 }
 
+.dev-toggle {
+  position: fixed;
+  top: calc(var(--safe-top) + 8px);
+  left: var(--safe-x);
+  z-index: 30;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--color-ui);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.15);
+  color: var(--color-ui-bright);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.dev-toggle--open {
+  border-color: var(--color-marker);
+  color: var(--color-marker);
+}
+
+.dev-panel {
+  position: fixed;
+  top: calc(var(--safe-top) + 40px);
+  left: var(--safe-x);
+  z-index: 30;
+  width: min(calc(100vw - 2 * var(--safe-x)), 320px);
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--color-ui);
+  border-radius: 12px;
+  background: rgba(0, 35, 110, 0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.dev-panel__title {
+  margin: 0 0 0.4rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.dev-panel__row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.35rem 0;
+  cursor: pointer;
+}
+
+.dev-panel__row--slider {
+  flex-wrap: wrap;
+  cursor: default;
+}
+
+.dev-panel__row--slider input[type="range"] {
+  flex: 1;
+  min-width: 120px;
+}
+
+.dev-panel__readout {
+  margin: 0.5rem 0 0;
+  padding: 0.45rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.22);
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.6875rem;
+  white-space: pre-wrap;
+}
+
 .start-overlay {
   position: fixed;
   inset: 0;

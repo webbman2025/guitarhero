@@ -18,9 +18,22 @@ export class AudioEngine {
   #analyser = null;
   /** @type {Float32Array | null} */
   #timeBuffer = null;
+  /** @type {boolean} */
+  #simulateMode = false;
+  /** @type {OscillatorNode | null} */
+  #oscillator = null;
+  /** @type {GainNode | null} */
+  #simGain = null;
 
   get isRunning() {
-    return this.#context?.state === "running" && this.#stream != null;
+    return (
+      this.#context?.state === "running" &&
+      (this.#stream != null || this.#simulateMode)
+    );
+  }
+
+  get simulateMode() {
+    return this.#simulateMode;
   }
 
   get sampleRate() {
@@ -28,27 +41,21 @@ export class AudioEngine {
   }
 
   /**
-   * Create AudioContext and mic graph — call only from a user gesture.
+   * Create AudioContext and mic or simulated-tone graph — call only from a user gesture.
+   * @param {{ simulate?: boolean, frequency?: number }} [options]
    */
-  async start() {
+  async start(options = {}) {
     if (this.isRunning) {
       return;
     }
 
-    this.#stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: false,
-        autoGainControl: false,
-        noiseSuppression: false,
-        channelCount: 1,
-      },
-      video: false,
-    });
+    const simulate = options.simulate === true;
+    const frequency = options.frequency ?? 196;
 
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     this.#context = new AudioCtx();
+    this.#simulateMode = simulate;
 
-    this.#source = this.#context.createMediaStreamSource(this.#stream);
     this.#bandpass = this.#context.createBiquadFilter();
     this.#bandpass.type = "bandpass";
     this.#bandpass.frequency.value = BANDPASS_FREQ;
@@ -59,13 +66,56 @@ export class AudioEngine {
     this.#analyser.smoothingTimeConstant = 0;
     this.#timeBuffer = new Float32Array(this.#analyser.fftSize);
 
-    this.#source.connect(this.#bandpass);
-    this.#bandpass.connect(this.#analyser);
+    if (simulate) {
+      this.#oscillator = this.#context.createOscillator();
+      this.#simGain = this.#context.createGain();
+      this.#oscillator.type = "sine";
+      this.#oscillator.frequency.value = frequency;
+      this.#simGain.gain.value = 0.38;
+      this.#oscillator.connect(this.#simGain);
+      this.#simGain.connect(this.#bandpass);
+      this.#bandpass.connect(this.#analyser);
+      this.#oscillator.start();
+    } else {
+      this.#stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          autoGainControl: false,
+          noiseSuppression: false,
+          channelCount: 1,
+        },
+        video: false,
+      });
+
+      this.#source = this.#context.createMediaStreamSource(this.#stream);
+      this.#source.connect(this.#bandpass);
+      this.#bandpass.connect(this.#analyser);
+    }
 
     await this.#context.resume();
   }
 
+  /** @param {number} frequency */
+  setSimulatedFrequency(frequency) {
+    if (this.#oscillator) {
+      this.#oscillator.frequency.value = frequency;
+    }
+  }
+
   stop() {
+    if (this.#oscillator) {
+      try {
+        this.#oscillator.stop();
+      } catch {
+        /* already stopped */
+      }
+      this.#oscillator.disconnect();
+    }
+    this.#simGain?.disconnect();
+    this.#oscillator = null;
+    this.#simGain = null;
+    this.#simulateMode = false;
+
     this.#source?.disconnect();
     this.#bandpass?.disconnect();
     this.#analyser?.disconnect();
