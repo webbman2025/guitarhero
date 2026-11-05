@@ -38,6 +38,29 @@ body.perfect-tune {
   background: var(--color-bg-in-tune);
 }
 
+.app-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  padding:
+    calc(var(--safe-top) + 10px)
+    calc(var(--safe-x) + 52px)
+    6px
+    calc(var(--safe-x) + 52px);
+  text-align: center;
+  pointer-events: none;
+}
+
+.app-header__title {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--color-marker);
+}
+
 .dev-toggle {
   position: fixed;
   top: calc(var(--safe-top) + 8px);
@@ -239,7 +262,7 @@ html.mic-granted-boot .start-overlay {
   max-width: 430px;
   margin: 0 auto;
   padding:
-    calc(var(--safe-top) + 12px)
+    calc(var(--safe-top) + 40px)
     var(--safe-x)
     calc(var(--safe-bottom) + 8px);
   display: grid;
@@ -250,7 +273,7 @@ html.mic-granted-boot .start-overlay {
 
 .tuner__stop {
   position: absolute;
-  top: calc(var(--safe-top) + 10px);
+  top: calc(var(--safe-top) + 36px);
   right: calc(var(--safe-x));
   z-index: 5;
   padding: 0.4rem 0.75rem;
