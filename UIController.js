@@ -10,12 +10,16 @@ export const GUITAR_STRINGS = [
   { id: "E4", letter: "E", hz: 329.63 },
 ];
 
-/** 7-segment patterns for open-string letters. */
+const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+/** 7-segment patterns for note letters (voice / chromatic display). */
 const SEGMENT_LETTERS = {
   A: ["a", "b", "c", "e", "f", "g"],
   B: ["a", "b", "c", "d", "e", "f", "g"],
+  C: ["a", "d", "e", "f"],
   D: ["b", "c", "d", "e", "g"],
   E: ["a", "d", "e", "f", "g"],
+  F: ["a", "e", "f", "g"],
   G: ["a", "c", "d", "e", "f", "g"],
 };
 
@@ -34,8 +38,8 @@ export class UIController {
   #engine = new AudioEngine();
   /** @type {number} */
   #rafId = 0;
-  /** @type {number | null} */
-  #needleTargetDeg = null;
+  /** @type {number} */
+  #needleTargetDeg = 0;
   /** @type {number} */
   #needleDeg = 0;
   /** @type {string} */
@@ -192,20 +196,18 @@ export class UIController {
     this.#engine.stop();
     cancelAnimationFrame(this.#rafId);
     this.#rafId = 0;
-    this.#needleTargetDeg = null;
+    this.#needleTargetDeg = 0;
     this.#needleDeg = 0;
     this.dom.needleWrap.setAttribute(
       "transform",
       `rotate(0 ${NEEDLE_PIVOT_X} ${NEEDLE_PIVOT_Y})`,
     );
+    this.#clearLivePitch("");
     this.dom.overlay.classList.remove("start-overlay--hidden");
     this.dom.appMain.setAttribute("aria-hidden", "true");
     this.dom.appMain.classList.remove("tuner--live");
     this.dom.stopBtn.hidden = true;
     this.dom.overlayBtn.textContent = "Tap to Start Tuner";
-    this.dom.centsLabel.textContent = "";
-    this.dom.centsLabel.classList.remove("tuner__cents--perfect");
-    this.dom.statusLabel.textContent = "";
     this.#setSevenSegLetter("G", true);
   }
 
@@ -220,26 +222,17 @@ export class UIController {
         }
 
         if (result === false) {
-          if (!voiceTest) {
-            this.dom.statusLabel.textContent = "";
-            this.dom.centsLabel.textContent = "";
-            this.dom.centsLabel.classList.remove("tuner__cents--perfect");
-          } else {
-            this.dom.statusLabel.textContent = "Voice: too quiet";
-          }
+          this.#clearLivePitch(voiceTest ? "Voice: too quiet" : "");
         } else if (result.confidence < CONFIDENCE_MIN) {
           if (voiceTest && result.confidence >= DEV_VOICE_CONFIDENCE_MIN) {
-            this.#applyTuning(result.frequency, {
+            this.#applyChromaticPitch(result.frequency, {
               allowPerfect: false,
-              statusHint: "Voice test (needle only)",
             });
-          } else if (voiceTest) {
-            this.dom.statusLabel.textContent = "Voice: keep humming…";
           } else {
-            this.dom.statusLabel.textContent = "";
-            this.dom.centsLabel.textContent = "";
-            this.dom.centsLabel.classList.remove("tuner__cents--perfect");
+            this.#clearLivePitch(voiceTest ? "Voice: keep humming…" : "");
           }
+        } else if (voiceTest) {
+          this.#applyChromaticPitch(result.frequency, { allowPerfect: true });
         } else {
           this.#applyTuning(result.frequency, { allowPerfect: true });
         }
@@ -248,6 +241,15 @@ export class UIController {
 
     this.#smoothNeedle();
     this.#rafId = requestAnimationFrame(() => this.#frame());
+  }
+
+  /** Reset needle to center and clear live pitch readout. */
+  #clearLivePitch(statusText) {
+    this.#needleTargetDeg = 0;
+    this.dom.statusLabel.textContent = statusText;
+    this.dom.centsLabel.textContent = "—";
+    this.dom.centsLabel.classList.remove("tuner__cents--perfect");
+    this.#setSevenSegLetter("G", false);
   }
 
   #isDevVoiceMode() {
@@ -317,6 +319,40 @@ export class UIController {
   }
 
   /**
+   * Chromatic frequency-checker style (voice dev / humming).
+   * @param {number} frequency
+   * @param {{ allowPerfect?: boolean }} [options]
+   */
+  #applyChromaticPitch(frequency, options = {}) {
+    const allowPerfect = options.allowPerfect !== false;
+    const N = 69 + 12 * Math.log2(frequency / 440);
+    const nearestMidi = Math.round(N);
+    const cents = 1200 * (N - nearestMidi);
+
+    this.#needleTargetDeg = UIController.#centsToNeedleDegrees(cents);
+
+    const noteName = NOTE_NAMES[((nearestMidi % 12) + 12) % 12];
+    const octave = Math.floor(nearestMidi / 12) - 1;
+    const letter = noteName.charAt(0);
+
+    const inTune = Math.abs(cents) <= IN_TUNE_CENTS;
+    const showPerfect = allowPerfect && inTune;
+    this.#setSevenSegLetter(letter, true, showPerfect);
+
+    const rounded = Math.round(cents);
+    const sign = rounded > 0 ? "+" : "";
+    this.dom.centsLabel.classList.toggle("tuner__cents--perfect", showPerfect);
+
+    if (showPerfect) {
+      this.dom.statusLabel.textContent = `${frequency.toFixed(1)} Hz · ${noteName}${octave}`;
+      this.dom.centsLabel.textContent = "Perfect";
+    } else {
+      this.dom.statusLabel.textContent = `${frequency.toFixed(1)} Hz · ${noteName}${octave}`;
+      this.dom.centsLabel.textContent = `${sign}${rounded}¢`;
+    }
+  }
+
+  /**
    * @param {string} letter
    * @param {boolean} active
    * @param {boolean} inTune
@@ -355,9 +391,6 @@ export class UIController {
   }
 
   #smoothNeedle() {
-    if (this.#needleTargetDeg == null) {
-      return;
-    }
     this.#needleDeg += (this.#needleTargetDeg - this.#needleDeg) * 0.22;
     this.dom.needleWrap.setAttribute(
       "transform",
