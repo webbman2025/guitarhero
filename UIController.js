@@ -424,31 +424,42 @@ export class UIController {
 
   #frame() {
     if (this.#engine.isRunning) {
-      const buffer = this.#engine.readTimeDomainBuffer();
-      if (buffer) {
-        const voiceMode = this.#isVoiceMode();
-        const simMode = this.#engine.simulateMode;
-        const result = this.#engine.detectPitch(buffer, {
-          relaxGates: voiceMode || simMode,
-        });
-        if (this.#devOpen) {
-          this.#updateDevReadoutFromResult(result, buffer);
-        }
+      const voiceMode = this.#isVoiceMode();
+      const simMode = this.#engine.simulateMode;
 
-        if (result === false) {
-          this.#clearLivePitch(voiceMode ? "Voice: too quiet" : "");
-        } else if (result.confidence < CONFIDENCE_MIN) {
-          if (voiceMode && result.confidence >= DEV_VOICE_CONFIDENCE_MIN) {
-            this.#applyChromaticPitch(result.frequency, {
-              allowPerfect: false,
-            });
-          } else {
-            this.#clearLivePitch(voiceMode ? "Voice: keep humming…" : "");
+      if (simMode && !voiceMode) {
+        const freq = this.#simFrequencyForSelectedString();
+        this.#applyTuning(freq, { allowPerfect: true });
+        if (this.#devOpen) {
+          this.dom.devReadout.textContent =
+            `Demo sim · ${freq.toFixed(2)} Hz\n` +
+            `Target offset: ${this.#devSimCents > 0 ? "+" : ""}${this.#devSimCents}¢`;
+        }
+      } else {
+        const buffer = this.#engine.readTimeDomainBuffer();
+        if (buffer) {
+          const result = this.#engine.detectPitch(buffer, {
+            relaxGates: voiceMode,
+          });
+          if (this.#devOpen) {
+            this.#updateDevReadoutFromResult(result, buffer);
           }
-        } else if (voiceMode) {
-          this.#applyChromaticPitch(result.frequency, { allowPerfect: true });
-        } else {
-          this.#applyTuning(result.frequency, { allowPerfect: true });
+
+          if (result === false) {
+            this.#clearLivePitch(voiceMode ? "Voice: too quiet" : "");
+          } else if (result.confidence < CONFIDENCE_MIN) {
+            if (voiceMode && result.confidence >= DEV_VOICE_CONFIDENCE_MIN) {
+              this.#applyChromaticPitch(result.frequency, {
+                allowPerfect: false,
+              });
+            } else {
+              this.#clearLivePitch(voiceMode ? "Voice: keep humming…" : "");
+            }
+          } else if (voiceMode) {
+            this.#applyChromaticPitch(result.frequency, { allowPerfect: true });
+          } else {
+            this.#applyTuning(result.frequency, { allowPerfect: true });
+          }
         }
       }
     }
@@ -777,7 +788,8 @@ export class UIController {
   }
 
   #smoothNeedle() {
-    this.#needleDeg += (this.#needleTargetDeg - this.#needleDeg) * 0.22;
+    const smoothing = this.#engine.simulateMode ? 0.14 : 0.22;
+    this.#needleDeg += (this.#needleTargetDeg - this.#needleDeg) * smoothing;
     this.dom.needleWrap.setAttribute(
       "transform",
       `rotate(${this.#needleDeg.toFixed(2)} ${NEEDLE_PIVOT_X} ${NEEDLE_PIVOT_Y})`,

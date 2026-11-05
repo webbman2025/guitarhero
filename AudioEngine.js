@@ -37,6 +37,11 @@ export class AudioEngine {
   #simToneFilter = null;
   /** @type {{ osc: OscillatorNode, level: GainNode, ratio: number }[]} */
   #simPartials = [];
+  /** Steady fundamental for analyser — not affected by pluck envelope. */
+  /** @type {OscillatorNode | null} */
+  #analysisOsc = null;
+  /** @type {GainNode | null} */
+  #analysisGain = null;
 
   get isRunning() {
     return (
@@ -116,13 +121,22 @@ export class AudioEngine {
       return;
     }
 
+    this.#analysisOsc = this.#context.createOscillator();
+    this.#analysisGain = this.#context.createGain();
+    this.#analysisOsc.type = "sine";
+    this.#analysisOsc.frequency.value = fundamentalHz;
+    this.#analysisGain.gain.value = 0.42;
+    this.#analysisOsc.connect(this.#analysisGain);
+    this.#analysisGain.connect(this.#analyser);
+    this.#analysisOsc.start();
+
     this.#simGain = this.#context.createGain();
     this.#simGain.gain.value = 0.0001;
 
     this.#simToneFilter = this.#context.createBiquadFilter();
     this.#simToneFilter.type = "lowpass";
-    this.#simToneFilter.frequency.value = 2800;
-    this.#simToneFilter.Q.value = 0.65;
+    this.#simToneFilter.frequency.value = 3200;
+    this.#simToneFilter.Q.value = 0.55;
 
     this.#monitorGain = this.#context.createGain();
     this.#monitorGain.gain.value = AudioEngine.#monitorLevelForFrequency(fundamentalHz);
@@ -132,7 +146,7 @@ export class AudioEngine {
       const level = this.#context.createGain();
       osc.type = partial.wave;
       osc.frequency.value = fundamentalHz * partial.ratio;
-      level.gain.value = partial.level * 0.11;
+      level.gain.value = partial.level * 0.16;
       osc.connect(level);
       level.connect(this.#simGain);
       osc.start();
@@ -140,13 +154,15 @@ export class AudioEngine {
     }
 
     this.#simGain.connect(this.#simToneFilter);
-    this.#simToneFilter.connect(this.#analyser);
-    this.#simGain.connect(this.#monitorGain);
+    this.#simToneFilter.connect(this.#monitorGain);
     this.#monitorGain.connect(this.#context.destination);
   }
 
   /** @param {number} fundamentalHz */
   #setPartialFrequencies(fundamentalHz) {
+    if (this.#analysisOsc) {
+      this.#analysisOsc.frequency.value = fundamentalHz;
+    }
     for (const { osc, ratio } of this.#simPartials) {
       osc.frequency.value = fundamentalHz * ratio;
     }
@@ -161,14 +177,14 @@ export class AudioEngine {
     }
 
     const t = this.#context.currentTime;
-    const peak = 0.72;
-    const sustain = 0.42;
+    const peak = 0.95;
+    const sustain = 0.68;
 
     this.#simGain.gain.cancelScheduledValues(t);
     this.#simGain.gain.setValueAtTime(0.0001, t);
-    this.#simGain.gain.exponentialRampToValueAtTime(peak, t + 0.01);
-    this.#simGain.gain.exponentialRampToValueAtTime(sustain, t + 0.09);
-    this.#simGain.gain.setTargetAtTime(sustain, t + 0.09, 1.4);
+    this.#simGain.gain.exponentialRampToValueAtTime(peak, t + 0.008);
+    this.#simGain.gain.exponentialRampToValueAtTime(sustain, t + 0.07);
+    this.#simGain.gain.setTargetAtTime(sustain * 0.75, t + 0.07, 2.8);
 
     const sr = this.#context.sampleRate;
     const pickSamples = Math.max(1, Math.floor(sr * 0.006));
@@ -181,7 +197,7 @@ export class AudioEngine {
     const pickSrc = this.#context.createBufferSource();
     const pickGain = this.#context.createGain();
     pickSrc.buffer = pick;
-    pickGain.gain.value = 0.08;
+    pickGain.gain.value = 0.14;
     pickSrc.connect(pickGain);
     pickGain.connect(this.#simGain);
     pickSrc.start(t);
@@ -214,15 +230,27 @@ export class AudioEngine {
   /** Low open E (~82 Hz) is hard to hear on phone speakers — boost monitor level. */
   static #monitorLevelForFrequency(frequency) {
     if (frequency < 95) {
-      return 0.32;
+      return 0.48;
     }
     if (frequency < 130) {
-      return 0.2;
+      return 0.32;
     }
-    return 0.14;
+    return 0.22;
   }
 
   stop() {
+    if (this.#analysisOsc) {
+      try {
+        this.#analysisOsc.stop();
+      } catch {
+        /* already stopped */
+      }
+      this.#analysisOsc.disconnect();
+    }
+    this.#analysisGain?.disconnect();
+    this.#analysisOsc = null;
+    this.#analysisGain = null;
+
     for (const { osc, level } of this.#simPartials) {
       try {
         osc.stop();
