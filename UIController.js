@@ -88,7 +88,7 @@ export class UIController {
   constructor(dom) {
     this.dom = dom;
     this.#buildGaugeTicks(dom.ticksGroup);
-    this.#setSevenSegLetter("G", true);
+    this.#hideNoteDisplay();
     document.body.classList.add("mode-guitar");
     this.#bindEvents();
     void this.#bootstrap();
@@ -150,9 +150,6 @@ export class UIController {
         this.#manualString = true;
         this.#setActiveStringButton(id);
         const match = GUITAR_STRINGS.find((s) => s.id === id);
-        if (match) {
-          this.#setSevenSegLetter(match.letter, true);
-        }
         this.#applySimFrequency();
       });
     }
@@ -388,7 +385,7 @@ export class UIController {
     this.#revealStartOverlay();
     void this.#syncStartOverlayCopy();
     this.#setPerfectFeedback(false);
-    this.#setSevenSegLetter("G", true);
+    this.#hideNoteDisplay();
   }
 
   #frame() {
@@ -430,9 +427,7 @@ export class UIController {
     this.dom.centsLabel.textContent = "—";
     this.dom.centsLabel.classList.remove("tuner__cents--perfect");
     this.#setPerfectFeedback(false);
-    const selected = GUITAR_STRINGS.find((s) => s.id === this.#selectedStringId);
-    const letter = selected?.letter ?? "G";
-    this.#setSevenSegLetter(letter, false);
+    this.#hideNoteDisplay();
   }
 
   #isVoiceMode() {
@@ -485,9 +480,6 @@ export class UIController {
     }
     this.#updateDevModeLabel();
     this.#clearLivePitch("");
-    if (mode === "guitar") {
-      this.#setSevenSegLetter("G", true);
-    }
   }
 
   #updateDevModeLabel() {
@@ -602,12 +594,21 @@ export class UIController {
     this.dom.appMain.classList.toggle("tuner--perfect", perfect);
   }
 
+  #hideNoteDisplay() {
+    for (const segEl of this.dom.segElements) {
+      segEl.classList.remove("seven-seg__seg--on");
+    }
+    this.dom.noteDisplay.classList.remove("seven-seg--in-tune", "seven-seg--active");
+    this.dom.noteDisplay.classList.add("seven-seg--idle");
+  }
+
   /**
    * @param {string} letter
    * @param {boolean} active
    * @param {boolean} inTune
    */
   #setSevenSegLetter(letter, active, inTune = false) {
+    this.dom.noteDisplay.classList.remove("seven-seg--idle");
     const onSegments = SEGMENT_LETTERS[letter] ?? SEGMENT_LETTERS.G;
     for (const segEl of this.dom.segElements) {
       const id = segEl.getAttribute("data-seg");

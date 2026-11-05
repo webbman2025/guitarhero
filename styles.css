@@ -356,6 +356,10 @@ html.mic-granted-boot .start-overlay {
   max-height: min(30dvh, 220px);
 }
 
+.seven-seg--idle {
+  visibility: hidden;
+}
+
 .seven-seg__seg {
   fill: var(--color-ui);
   opacity: 0.22;
