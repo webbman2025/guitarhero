@@ -6,7 +6,8 @@ Vanilla ES modules for Safari iOS, Chrome Android, and mobile webviews.
 
 - `index.html` — layout, SVG gauge, start overlay, string row
 - `styles.css` — fullscreen `#0066FF` theme, safe areas, 7-segment display
-- `AudioEngine.js` — Web Audio pipeline, RMS gate, autocorrelation
+- `AudioEngine.js` — Web Audio pipeline, RMS gate, autocorrelation; simulate mode plays `samples/guitar/` plucks
+- `samples/guitar/` — open-string WAVs for demo (see `ATTRIBUTION.md`)
 - `UIController.js` — RAF loop, string tuning, needle + in-tune state
 
 ## Run

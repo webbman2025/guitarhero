@@ -326,9 +326,12 @@ export class UIController {
     }
   }
 
-  async #tryStartTuner() {
+  /**
+   * @param {{ playDemoAudio?: boolean }} [options]
+   */
+  async #tryStartTuner(options = {}) {
     try {
-      await this.#startTunerCore();
+      await this.#startTunerCore(options);
       return true;
     } catch (err) {
       console.error(err);
@@ -339,11 +342,16 @@ export class UIController {
     }
   }
 
-  async #startTunerCore() {
+  /**
+   * @param {{ playDemoAudio?: boolean }} [audioOptions]
+   */
+  async #startTunerCore(audioOptions = {}) {
     this.#manualString = false;
     await this.#engine.start({
       simulate: this.#devSimulate,
       frequency: this.#simFrequencyForSelectedString(),
+      stringId: this.#selectedStringId,
+      playDemoAudio: audioOptions.playDemoAudio ?? this.#devDemoActive,
     });
     this.#enterLiveMode();
     this.#rememberMicGranted();
@@ -375,7 +383,10 @@ export class UIController {
       : "Check Settings → your browser → Microphone, then try again.";
   }
 
-  async #restartAudio() {
+  /**
+   * @param {{ playDemoAudio?: boolean }} [options]
+   */
+  async #restartAudio(options = {}) {
     const wasLive = this.#engine.isRunning;
     this.#engine.stop();
     if (!wasLive) {
@@ -385,6 +396,8 @@ export class UIController {
       await this.#engine.start({
         simulate: this.#devSimulate,
         frequency: this.#simFrequencyForSelectedString(),
+        stringId: this.#selectedStringId,
+        playDemoAudio: options.playDemoAudio ?? this.#devDemoActive,
       });
     } catch (err) {
       console.error(err);
@@ -399,7 +412,10 @@ export class UIController {
 
   #applySimFrequency() {
     if (this.#engine.simulateMode) {
-      this.#engine.setSimulatedFrequency(this.#simFrequencyForSelectedString(), { pluck: true });
+      this.#engine.setSimulatedFrequency(this.#simFrequencyForSelectedString(), {
+        pluck: true,
+        stringId: this.#selectedStringId,
+      });
     }
   }
 
@@ -562,6 +578,7 @@ export class UIController {
 
   #stopDevDemo() {
     this.#devDemoActive = false;
+    this.#engine.setPlayDemoAudio(false);
     if (this.#devSimulate) {
       this.#resetSimNeedleIdle();
     }
@@ -577,12 +594,12 @@ export class UIController {
     this.#setTuningMode("guitar");
     this.#setSimulateEnabled(true);
     if (!this.dom.appMain.classList.contains("tuner--live")) {
-      if (!(await this.#tryStartTuner())) {
+      if (!(await this.#tryStartTuner({ playDemoAudio: true }))) {
         this.dom.devReadout.textContent = "Demo needs audio — tap Start on the main screen, then try again.";
         return;
       }
     } else {
-      await this.#restartAudio();
+      await this.#restartAudio({ playDemoAudio: true });
     }
 
     this.#devDemoActive = true;
