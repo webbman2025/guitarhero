@@ -5,18 +5,13 @@ const RMS_GATE = 0.015;
 const MIN_FREQ = 70;
 const MAX_FREQ = 420;
 
-/** Open-string samples at standard tuning (Hz) — playbackRate scales detune in demo. */
-const GUITAR_SAMPLE_DEFS = {
-  E2: { url: "/samples/guitar/e2.wav", refHz: 82.41 },
-  A2: { url: "/samples/guitar/a2.wav", refHz: 110.0 },
-  D3: { url: "/samples/guitar/d3.wav", refHz: 146.83 },
-  G3: { url: "/samples/guitar/g3.wav", refHz: 196.0 },
-  B3: { url: "/samples/guitar/b3.wav", refHz: 246.94 },
-  E4: { url: "/samples/guitar/e4.wav", refHz: 329.63 },
-};
-
-/** @type {Promise<Map<string, ArrayBuffer>> | null} */
-let guitarSampleBytesPromise = null;
+/** Brief resonator mix — reads as a pluck, not a held note. */
+const DEMO_PLUCK_PARTIALS = [
+  { ratio: 1, gain: 1, q: 16 },
+  { ratio: 2, gain: 0.48, q: 11 },
+  { ratio: 3, gain: 0.22, q: 8 },
+  { ratio: 4, gain: 0.1, q: 6 },
+];
 
 export class AudioEngine {
   /** @type {AudioContext | null} */
@@ -33,24 +28,18 @@ export class AudioEngine {
   #timeBuffer = null;
   /** @type {boolean} */
   #simulateMode = false;
-  /** @type {GainNode | null} */
-  #monitorGain = null;
-  /** @type {BiquadFilterNode | null} */
-  #simToneFilter = null;
-  /** @type {BiquadFilterNode | null} */
-  #demoBodyFilter = null;
-  /** Last simulated pitch (demo/sim UI drives cents; no continuous analysis tone). */
-  /** @type {number} */
-  #simMonitorFrequency = 196;
-  /** @type {Map<string, AudioBuffer> | null} */
-  #guitarSamples = null;
   /** @type {string} */
   #simStringId = "G3";
-  /** @type {AudioBufferSourceNode[]} */
-  #activeSampleSources = [];
+  /** @type {number} */
+  #simMonitorFrequency = 196;
+  /** Nodes to tear down after each demo pluck. */
+  /** @type {{ stop?: () => void, disconnect: () => void }[]} */
+  #activeDemoNodes = [];
   /** Realistic plucks — only for Play tuner demo, not mic or dev simulate. */
   /** @type {boolean} */
   #playDemoAudio = false;
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  #demoTeardownTimer = null;
 
   get isRunning() {
     return (
@@ -59,7 +48,6 @@ export class AudioEngine {
     );
   }
 
-  /** Mic/sim graph still open (e.g. background suspend — do not re-prompt). */
   get hasActiveSession() {
     return (
       this.#context != null &&
@@ -77,7 +65,6 @@ export class AudioEngine {
   }
 
   /**
-   * Create AudioContext and mic or simulated-tone graph — call only from a user gesture.
    * @param {{ simulate?: boolean, frequency?: number, stringId?: string, playDemoAudio?: boolean }} [options]
    */
   async start(options = {}) {
@@ -86,13 +73,14 @@ export class AudioEngine {
     }
 
     const simulate = options.simulate === true;
-    const frequency = options.frequency ?? 196;
     const stringId = options.stringId ?? "G3";
     this.#playDemoAudio = options.playDemoAudio === true;
 
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     this.#context = new AudioCtx();
     this.#simulateMode = simulate;
+    this.#simStringId = stringId in { E2: 1, A2: 1, D3: 1, G3: 1, B3: 1, E4: 1 } ? stringId : "G3";
+    this.#simMonitorFrequency = options.frequency ?? 196;
 
     this.#bandpass = this.#context.createBiquadFilter();
     this.#bandpass.type = "bandpass";
@@ -105,12 +93,7 @@ export class AudioEngine {
     this.#timeBuffer = new Float32Array(this.#analyser.fftSize);
 
     if (simulate) {
-      if (this.#playDemoAudio) {
-        this.#guitarSamples = await AudioEngine.#loadGuitarSamples(this.#context);
-      }
-      this.#simStringId = stringId in GUITAR_SAMPLE_DEFS ? stringId : "G3";
-      this.#simMonitorFrequency = frequency;
-      this.#buildSimulatedGuitarGraph(this.#playDemoAudio);
+      /* Demo/sim: UI drives cents — no mic, no speaker graph until a pluck. */
     } else {
       this.#stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -130,119 +113,103 @@ export class AudioEngine {
     await this.#context.resume();
   }
 
-  /** @param {AudioContext} context */
-  static async #loadGuitarSamples(context) {
-    if (!guitarSampleBytesPromise) {
-      guitarSampleBytesPromise = (async () => {
-        /** @type {Map<string, ArrayBuffer>} */
-        const map = new Map();
-        await Promise.all(
-          Object.entries(GUITAR_SAMPLE_DEFS).map(async ([id, def]) => {
-            const res = await fetch(def.url);
-            if (!res.ok) {
-              throw new Error(`Failed to load guitar sample ${id}: ${res.status}`);
-            }
-            map.set(id, await res.arrayBuffer());
-          }),
-        );
-        return map;
-      })();
-    }
-    const bytes = await guitarSampleBytesPromise;
-    /** @type {Map<string, AudioBuffer>} */
-    const decoded = new Map();
-    for (const [id, data] of bytes) {
-      decoded.set(id, await context.decodeAudioData(data.slice(0)));
-    }
-    return decoded;
-  }
-
-  /** @param {boolean} withSpeakerMonitor */
-  #buildSimulatedGuitarGraph(withSpeakerMonitor) {
-    if (!this.#context || !withSpeakerMonitor) {
-      return;
-    }
-
-    this.#demoBodyFilter = this.#context.createBiquadFilter();
-    this.#demoBodyFilter.type = "lowshelf";
-    this.#demoBodyFilter.frequency.value = 200;
-    this.#demoBodyFilter.gain.value = 2.5;
-
-    this.#simToneFilter = this.#context.createBiquadFilter();
-    this.#simToneFilter.type = "lowpass";
-    this.#simToneFilter.frequency.value = 5800;
-    this.#simToneFilter.Q.value = 0.25;
-
-    this.#monitorGain = this.#context.createGain();
-    this.#monitorGain.gain.value = AudioEngine.#monitorLevelForFrequency(this.#simMonitorFrequency);
-    this.#demoBodyFilter.connect(this.#simToneFilter);
-    this.#simToneFilter.connect(this.#monitorGain);
-    this.#monitorGain.connect(this.#context.destination);
-  }
-
-  /** @param {number} fundamentalHz */
-  #setSimMonitorLevel(fundamentalHz) {
-    this.#simMonitorFrequency = fundamentalHz;
-    if (this.#monitorGain) {
-      this.#monitorGain.gain.value = AudioEngine.#monitorLevelForFrequency(fundamentalHz);
+  #clearDemoTeardownTimer() {
+    if (this.#demoTeardownTimer != null) {
+      clearTimeout(this.#demoTeardownTimer);
+      this.#demoTeardownTimer = null;
     }
   }
 
-  /**
-   * @param {number} frequency
-   * @param {string} stringId
-   */
-  #stopActiveSamples() {
-    for (const src of this.#activeSampleSources) {
+  #tearDownDemoPluck() {
+    this.#clearDemoTeardownTimer();
+    for (const node of this.#activeDemoNodes) {
       try {
-        src.stop();
+        node.stop?.();
       } catch {
         /* already stopped */
       }
-      src.disconnect();
+      try {
+        node.disconnect();
+      } catch {
+        /* already disconnected */
+      }
     }
-    this.#activeSampleSources = [];
+    this.#activeDemoNodes = [];
   }
 
   /**
+   * One-shot pluck: speakers connected only for ~0.35 s, then fully disconnected.
    * @param {number} frequency
-   * @param {string} stringId
    */
-  #triggerSimPluck(frequency, stringId) {
-    if (!this.#playDemoAudio || !this.#context || !this.#simToneFilter || !this.#guitarSamples) {
+  #triggerDemoPluck(frequency) {
+    if (!this.#playDemoAudio || !this.#context) {
       return;
     }
 
-    const def = GUITAR_SAMPLE_DEFS[stringId] ?? GUITAR_SAMPLE_DEFS.G3;
-    const buffer = this.#guitarSamples.get(stringId) ?? this.#guitarSamples.get("G3");
-    if (!buffer) {
-      return;
+    this.#tearDownDemoPluck();
+
+    const ctx = this.#context;
+    const t = ctx.currentTime;
+    const sr = ctx.sampleRate;
+    const level = AudioEngine.#monitorLevelForFrequency(frequency);
+
+    const pickLen = Math.max(1, Math.floor(sr * 0.0035));
+    const pickBuf = ctx.createBuffer(1, pickLen, sr);
+    const pickData = pickBuf.getChannelData(0);
+    for (let i = 0; i < pickLen; i++) {
+      pickData[i] = (Math.random() * 2 - 1) * (1 - i / pickLen);
     }
 
-    this.#stopActiveSamples();
+    const pick = ctx.createBufferSource();
+    pick.buffer = pickBuf;
 
-    const t = this.#context.currentTime;
-    const playbackRate = frequency / def.refHz;
-    const src = this.#context.createBufferSource();
-    const gain = this.#context.createGain();
-    src.buffer = buffer;
-    src.playbackRate.value = playbackRate;
-    src.connect(gain);
-    const monitorIn = this.#demoBodyFilter ?? this.#simToneFilter;
-    gain.connect(monitorIn);
+    const master = ctx.createGain();
+    master.gain.setValueAtTime(0.0001, t);
+    master.gain.exponentialRampToValueAtTime(level, t + 0.002);
+    master.gain.exponentialRampToValueAtTime(level * 0.28, t + 0.045);
+    master.gain.setTargetAtTime(0.0001, t + 0.045, 0.065);
 
-    const pluckSec = Math.min(buffer.duration / playbackRate, 0.58);
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(1, t + 0.004);
-    gain.gain.exponentialRampToValueAtTime(0.22, t + 0.065);
-    gain.gain.setTargetAtTime(0.0001, t + 0.065, 0.09);
+    const click = ctx.createGain();
+    click.gain.value = 0.12;
+    pick.connect(click);
+    click.connect(master);
 
-    src.start(t);
-    src.stop(t + pluckSec + 0.02);
-    this.#activeSampleSources.push(src);
-    src.onended = () => {
-      this.#activeSampleSources = this.#activeSampleSources.filter((node) => node !== src);
-    };
+    /** @type {AudioNode[]} */
+    const pluckNodes = [pick, master, click];
+
+    for (const partial of DEMO_PLUCK_PARTIALS) {
+      const bp = ctx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.value = frequency * partial.ratio;
+      bp.Q.value = partial.q;
+      const partialGain = ctx.createGain();
+      partialGain.gain.value = partial.gain * 0.2;
+      pick.connect(bp);
+      bp.connect(partialGain);
+      partialGain.connect(master);
+      pluckNodes.push(bp, partialGain);
+    }
+
+    const bright = ctx.createBiquadFilter();
+    bright.type = "lowpass";
+    bright.frequency.value = Math.min(5200, frequency * 9);
+    bright.Q.value = 0.35;
+    master.connect(bright);
+    bright.connect(ctx.destination);
+    pluckNodes.push(bright);
+
+    pick.start(t);
+    pick.stop(t + 0.02);
+
+    this.#activeDemoNodes = pluckNodes.map((node) => ({
+      stop: node instanceof AudioBufferSourceNode ? () => node.stop() : undefined,
+      disconnect: () => node.disconnect(),
+    }));
+
+    const endSec = 0.38;
+    this.#demoTeardownTimer = setTimeout(() => {
+      this.#tearDownDemoPluck();
+    }, endSec * 1000);
   }
 
   async suspend() {
@@ -262,52 +229,35 @@ export class AudioEngine {
    * @param {{ pluck?: boolean, stringId?: string }} [options]
    */
   setSimulatedFrequency(frequency, options = {}) {
-    const stringId =
-      options.stringId && options.stringId in GUITAR_SAMPLE_DEFS
-        ? options.stringId
-        : this.#simStringId;
-    this.#simStringId = stringId;
-    this.#setSimMonitorLevel(frequency);
+    if (options.stringId && options.stringId in { E2: 1, A2: 1, D3: 1, G3: 1, B3: 1, E4: 1 }) {
+      this.#simStringId = options.stringId;
+    }
+    this.#simMonitorFrequency = frequency;
     if (options.pluck !== false && this.#playDemoAudio) {
-      this.#triggerSimPluck(frequency, stringId);
+      this.#triggerDemoPluck(frequency);
     }
   }
 
-  /** Mute demo plucks when leaving Play tuner demo (simulate needle can stay live). */
   setPlayDemoAudio(enabled) {
     this.#playDemoAudio = enabled;
     if (!enabled) {
-      this.#stopActiveSamples();
-      if (this.#monitorGain) {
-        this.#monitorGain.gain.value = 0;
-      }
-    } else if (this.#monitorGain) {
-      this.#monitorGain.gain.value = AudioEngine.#monitorLevelForFrequency(this.#simMonitorFrequency);
+      this.#tearDownDemoPluck();
     }
   }
 
-  /** Low open E (~82 Hz) is hard to hear on phone speakers — boost monitor level. */
   static #monitorLevelForFrequency(frequency) {
     if (frequency < 95) {
-      return 0.55;
+      return 0.62;
     }
     if (frequency < 130) {
-      return 0.38;
+      return 0.42;
     }
-    return 0.28;
+    return 0.32;
   }
 
   stop() {
-    this.#stopActiveSamples();
+    this.#tearDownDemoPluck();
     this.#playDemoAudio = false;
-
-    this.#demoBodyFilter?.disconnect();
-    this.#simToneFilter?.disconnect();
-    this.#monitorGain?.disconnect();
-    this.#demoBodyFilter = null;
-    this.#monitorGain = null;
-    this.#simToneFilter = null;
-    this.#guitarSamples = null;
     this.#simulateMode = false;
 
     this.#source?.disconnect();
@@ -331,9 +281,6 @@ export class AudioEngine {
     this.#timeBuffer = null;
   }
 
-  /**
-   * @returns {Float32Array | null}
-   */
   readTimeDomainBuffer() {
     if (!this.#analyser || !this.#timeBuffer) {
       return null;
@@ -342,15 +289,6 @@ export class AudioEngine {
     return this.#timeBuffer;
   }
 
-  /**
-   * RMS gate + autocorrelation pitch detection.
-   * @param {Float32Array} buffer
-   * @returns {false | { frequency: number, confidence: number, rms: number }}
-   */
-  /**
-   * @param {Float32Array} buffer
-   * @param {{ relaxGates?: boolean }} [options]
-   */
   detectPitch(buffer, options = {}) {
     const rmsGate = options.relaxGates ? 0.004 : RMS_GATE;
     const rms = AudioEngine.computeRms(buffer);
@@ -374,7 +312,6 @@ export class AudioEngine {
     };
   }
 
-  /** @param {Float32Array} samples */
   static computeRms(samples) {
     let sum = 0;
     for (let i = 0; i < samples.length; i++) {
@@ -384,7 +321,6 @@ export class AudioEngine {
     return Math.sqrt(sum / samples.length);
   }
 
-  /** @param {Float32Array} samples @param {number} factor */
   static #downsample(samples, factor) {
     const len = Math.floor(samples.length / factor);
     const out = new Float32Array(len);
@@ -394,11 +330,6 @@ export class AudioEngine {
     return out;
   }
 
-  /**
-   * @param {Float32Array} samples
-   * @param {number} sampleRate
-   * @returns {{ frequency: number, confidence: number } | null}
-   */
   static #autocorrelate(samples, sampleRate) {
     const minPeriod = Math.floor(sampleRate / MAX_FREQ);
     const maxPeriod = Math.ceil(sampleRate / MIN_FREQ);
