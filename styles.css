@@ -205,6 +205,10 @@ body.perfect-tune {
   pointer-events: none;
 }
 
+html.mic-granted-boot .start-overlay {
+  display: none;
+}
+
 .start-overlay__hint {
   margin: 0;
   max-width: min(100%, 300px);

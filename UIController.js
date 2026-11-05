@@ -91,8 +91,7 @@ export class UIController {
     this.#setSevenSegLetter("G", true);
     document.body.classList.add("mode-guitar");
     this.#bindEvents();
-    void this.#syncStartOverlayCopy();
-    void this.#watchMicPermission();
+    void this.#bootstrap();
   }
 
   #bindEvents() {
@@ -195,11 +194,45 @@ export class UIController {
     try {
       const status = await navigator.permissions.query({ name: "microphone" });
       status.onchange = () => {
-        void this.#syncStartOverlayCopy();
+        void this.#onMicPermissionChange(status.state);
       };
     } catch {
       /* Permissions API unsupported for microphone */
     }
+  }
+
+  async #bootstrap() {
+    await this.#watchMicPermission();
+    if (await this.#shouldAutoStart()) {
+      if (await this.#tryStartTuner()) {
+        return;
+      }
+    }
+    this.#revealStartOverlay();
+    await this.#syncStartOverlayCopy();
+  }
+
+  async #shouldAutoStart() {
+    return !this.#devSimulate && (await this.#micLooksGranted());
+  }
+
+  async #onMicPermissionChange(state) {
+    if (state !== "granted") {
+      return;
+    }
+    if (this.dom.appMain.classList.contains("tuner--live")) {
+      return;
+    }
+    if (await this.#tryStartTuner()) {
+      return;
+    }
+    this.#revealStartOverlay();
+    await this.#syncStartOverlayCopy();
+  }
+
+  #revealStartOverlay() {
+    document.documentElement.classList.remove("mic-granted-boot");
+    this.dom.overlay.classList.remove("start-overlay--hidden");
   }
 
   async #syncStartOverlayCopy() {
@@ -211,10 +244,9 @@ export class UIController {
     }
     const granted = await this.#micLooksGranted();
     if (granted) {
-      this.dom.overlayBtn.textContent = "Tap to listen";
-      this.dom.overlayHint.hidden = false;
-      this.dom.overlayHint.textContent =
-        "Microphone is already allowed for this site. You should not see the Allow prompt again.";
+      this.dom.overlayBtn.textContent = "Tap to continue";
+      this.dom.overlayHint.hidden = true;
+      this.dom.overlayHint.textContent = "";
     } else {
       this.dom.overlayBtn.textContent = "Tap to Start Tuner";
       this.dom.overlayHint.hidden = false;
@@ -257,37 +289,56 @@ export class UIController {
       console.error(err);
       this.#resumeAfterBackground = false;
       this.#shutdown();
-      this.dom.overlayBtn.textContent = "Tap to listen";
+    }
+  }
+
+  async #tryStartTuner() {
+    try {
+      await this.#startTunerCore();
+      return true;
+    } catch (err) {
+      console.error(err);
+      if (this.#engine.hasActiveSession) {
+        this.#engine.stop();
+      }
+      return false;
+    }
+  }
+
+  async #startTunerCore() {
+    this.#manualString = false;
+    await this.#engine.start({
+      simulate: this.#devSimulate,
+      frequency: this.#simFrequencyForSelectedString(),
+    });
+    this.#enterLiveMode();
+    this.#rememberMicGranted();
+    document.documentElement.classList.add("mic-granted-boot");
+  }
+
+  #enterLiveMode() {
+    this.dom.overlay.classList.add("start-overlay--hidden");
+    this.dom.appMain.setAttribute("aria-hidden", "false");
+    this.dom.appMain.classList.add("tuner--live");
+    this.dom.stopBtn.hidden = false;
+    this.dom.statusLabel.textContent = "";
+    if (!this.#rafId) {
+      this.#rafId = requestAnimationFrame(() => this.#frame());
     }
   }
 
   async #onStartTap() {
-    try {
-      this.#manualString = false;
-      await this.#engine.start({
-        simulate: this.#devSimulate,
-        frequency: this.#simFrequencyForSelectedString(),
-      });
-      this.dom.overlay.classList.add("start-overlay--hidden");
-      this.dom.appMain.setAttribute("aria-hidden", "false");
-      this.dom.appMain.classList.add("tuner--live");
-      this.dom.stopBtn.hidden = false;
-      this.dom.statusLabel.textContent = "";
-      if (!this.#rafId) {
-        this.#rafId = requestAnimationFrame(() => this.#frame());
-      }
-      this.#rememberMicGranted();
-      void this.#syncStartOverlayCopy();
-    } catch (err) {
-      console.error(err);
-      this.dom.overlayBtn.textContent = this.#devSimulate
-        ? "Audio failed — try again"
-        : "Microphone blocked — try again";
-      this.dom.overlayHint.hidden = false;
-      this.dom.overlayHint.textContent = this.#devSimulate
-        ? ""
-        : "Check Settings → your browser → Microphone, then try again.";
+    this.#revealStartOverlay();
+    if (await this.#tryStartTuner()) {
+      return;
     }
+    this.dom.overlayBtn.textContent = this.#devSimulate
+      ? "Audio failed — try again"
+      : "Microphone blocked — try again";
+    this.dom.overlayHint.hidden = false;
+    this.dom.overlayHint.textContent = this.#devSimulate
+      ? ""
+      : "Check Settings → your browser → Microphone, then try again.";
   }
 
   async #restartAudio() {
@@ -334,6 +385,7 @@ export class UIController {
     this.dom.appMain.setAttribute("aria-hidden", "true");
     this.dom.appMain.classList.remove("tuner--live");
     this.dom.stopBtn.hidden = true;
+    this.#revealStartOverlay();
     void this.#syncStartOverlayCopy();
     this.#setPerfectFeedback(false);
     this.#setSevenSegLetter("G", true);

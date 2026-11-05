@@ -7,6 +7,15 @@
   <meta name="theme-color" content="#0066FF" />
   <title>Guitar Tuner</title>
   <link rel="stylesheet" href="styles.css" />
+  <script>
+    (function () {
+      try {
+        if (localStorage.getItem("guitar_tuner_mic_granted") === "1") {
+          document.documentElement.classList.add("mic-granted-boot");
+        }
+      } catch (_) {}
+    })();
+  </script>
 </head>
 <body class="mode-guitar">
   <button type="button" class="dev-toggle" id="dev-toggle" aria-expanded="false" aria-controls="dev-panel">
