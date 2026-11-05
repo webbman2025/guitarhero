@@ -1,8 +1,8 @@
 /**
  * Bump VERSION on each release that should refresh cached files.
- * Install does not skipWaiting — updates apply on next full app open by default.
+ * Bump VERSION on each release. skipWaiting on install avoids a stuck "waiting" worker on iOS PWA.
  */
-const VERSION = "2";
+const VERSION = "3";
 
 const CACHE = `guitarhero-static-${VERSION}`;
 
@@ -20,6 +20,7 @@ const PRECACHE = [
 ];
 
 self.addEventListener("install", (event) => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE).then((cache) =>
       cache.addAll(PRECACHE).catch((err) => {
@@ -27,7 +28,6 @@ self.addEventListener("install", (event) => {
       }),
     ),
   );
-  // Stay in "waiting" until all tabs close (next open) or user taps Reload in the app.
 });
 
 self.addEventListener("activate", (event) => {

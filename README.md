@@ -21,4 +21,4 @@ Open via HTTPS or `localhost` for microphone access.
 
 Install via **Add to Home Screen** after one online visit. Cached assets work offline; tuning stays on-device.
 
-On deploy, bump `VERSION` in `sw.js`. New service workers **wait** until the app is fully closed (**update on next open**) or the user taps **Reload** on the optional update bar.
+On deploy, bump `VERSION` in `sw.js`. Updates install in the background; the app may refresh once when a new worker takes over (no manual reload banner — works reliably on iOS Home Screen).
