@@ -24,6 +24,8 @@ export class AudioEngine {
   #oscillator = null;
   /** @type {GainNode | null} */
   #simGain = null;
+  /** @type {GainNode | null} */
+  #monitorGain = null;
 
   get isRunning() {
     return (
@@ -78,12 +80,16 @@ export class AudioEngine {
     if (simulate) {
       this.#oscillator = this.#context.createOscillator();
       this.#simGain = this.#context.createGain();
+      this.#monitorGain = this.#context.createGain();
       this.#oscillator.type = "sine";
       this.#oscillator.frequency.value = frequency;
-      this.#simGain.gain.value = 0.38;
+      this.#simGain.gain.value = 0.45;
+      this.#monitorGain.gain.value = 0.12;
       this.#oscillator.connect(this.#simGain);
-      this.#simGain.connect(this.#bandpass);
-      this.#bandpass.connect(this.#analyser);
+      // Bypass 440 Hz bandpass — guitar strings are ~82–330 Hz.
+      this.#simGain.connect(this.#analyser);
+      this.#simGain.connect(this.#monitorGain);
+      this.#monitorGain.connect(this.#context.destination);
       this.#oscillator.start();
     } else {
       this.#stream = await navigator.mediaDevices.getUserMedia({
@@ -133,8 +139,10 @@ export class AudioEngine {
       this.#oscillator.disconnect();
     }
     this.#simGain?.disconnect();
+    this.#monitorGain?.disconnect();
     this.#oscillator = null;
     this.#simGain = null;
+    this.#monitorGain = null;
     this.#simulateMode = false;
 
     this.#source?.disconnect();

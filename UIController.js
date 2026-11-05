@@ -34,16 +34,6 @@ const NEEDLE_PIVOT_Y = 168;
 const GAUGE_RADIUS = 147;
 const MIC_GRANTED_STORAGE_KEY = "guitar_tuner_mic_granted";
 
-/** Automated flat → in tune → sharp cycle for dev (simulate mode). */
-const DEV_DEMO_STEPS = [
-  { cents: -18, holdMs: 2200 },
-  { cents: -7, holdMs: 1400 },
-  { cents: -2, holdMs: 1200 },
-  { cents: 0, holdMs: 2800 },
-  { cents: 11, holdMs: 2000 },
-  { cents: 0, holdMs: 2400 },
-];
-
 export class UIController {
   /** @type {AudioEngine} */
   #engine = new AudioEngine();
@@ -69,12 +59,6 @@ export class UIController {
   #resumeAfterBackground = false;
   /** @type {boolean} */
   #devDemoActive = false;
-  /** @type {number} */
-  #devDemoTimer = 0;
-  /** @type {number} */
-  #devDemoStepIndex = 0;
-  /** @type {number} */
-  #devDemoStringIndex = 0;
 
   /**
    * @param {{
@@ -173,13 +157,7 @@ export class UIController {
 
     for (const btn of this.dom.stringButtons) {
       btn.addEventListener("click", () => {
-        const id = btn.getAttribute("data-string");
-        if (!id) return;
-        this.#selectedStringId = id;
-        this.#manualString = true;
-        this.#setActiveStringButton(id);
-        const match = GUITAR_STRINGS.find((s) => s.id === id);
-        this.#applySimFrequency();
+        void this.#onStringButtonTap(btn.getAttribute("data-string"));
       });
     }
 
@@ -442,8 +420,11 @@ export class UIController {
       const buffer = this.#engine.readTimeDomainBuffer();
       if (buffer) {
         const voiceMode = this.#isVoiceMode();
-        const result = this.#engine.detectPitch(buffer, { relaxGates: voiceMode });
-        if (this.#devOpen && !this.#devDemoActive) {
+        const simMode = this.#engine.simulateMode;
+        const result = this.#engine.detectPitch(buffer, {
+          relaxGates: voiceMode || simMode,
+        });
+        if (this.#devOpen) {
           this.#updateDevReadoutFromResult(result, buffer);
         }
 
@@ -522,15 +503,13 @@ export class UIController {
 
   #syncDevDemoBtn() {
     this.dom.devDemoBtn.setAttribute("aria-pressed", String(this.#devDemoActive));
-    this.dom.devDemoBtn.textContent = this.#devDemoActive ? "Stop tuner demo" : "Play tuner demo";
+    this.dom.devDemoBtn.textContent = this.#devDemoActive
+      ? "Stop tuner demo"
+      : "Play tuner demo (tap strings)";
     this.dom.devDemoBtn.classList.toggle("dev-menu__item--active", this.#devDemoActive);
   }
 
   #stopDevDemo() {
-    if (this.#devDemoTimer) {
-      window.clearTimeout(this.#devDemoTimer);
-      this.#devDemoTimer = 0;
-    }
     this.#devDemoActive = false;
     this.#syncDevDemoBtn();
   }
@@ -553,43 +532,47 @@ export class UIController {
     }
 
     this.#devDemoActive = true;
-    this.#devDemoStepIndex = 0;
-    this.#devDemoStringIndex = 0;
+    this.#devSimCents = 0;
+    this.dom.devSimCents.value = "0";
+    this.dom.devSimCentsOut.textContent = "0";
     this.#syncDevDemoBtn();
     this.#closeDevMenu();
-    this.#applyDevDemoStep();
+    void this.#onStringButtonTap(this.#selectedStringId);
+    this.dom.devReadout.textContent =
+      "Demo — tap E A D G B E below.\nYou should hear each open string tone; needle centers at 0¢.\nUse Sim detune slider to test flat/sharp.";
   }
 
-  #applyDevDemoStep() {
-    if (!this.#devDemoActive) {
+  /** @param {string | null} stringId */
+  async #onStringButtonTap(stringId) {
+    if (!stringId) {
       return;
     }
 
-    const string = GUITAR_STRINGS[this.#devDemoStringIndex];
-    const step = DEV_DEMO_STEPS[this.#devDemoStepIndex];
+    if (this.#devSimulate || this.#devDemoActive) {
+      this.#devSimCents = 0;
+      this.dom.devSimCents.value = "0";
+      this.dom.devSimCentsOut.textContent = "0";
+    }
 
-    this.#selectedStringId = string.id;
+    this.#selectedStringId = stringId;
     this.#manualString = true;
-    this.#setActiveStringButton(string.id);
-    this.#devSimCents = step.cents;
-    this.dom.devSimCents.value = String(step.cents);
-    this.dom.devSimCentsOut.textContent = String(step.cents);
+    this.#setActiveStringButton(stringId);
+
+    if (this.#devSimulate && !this.#engine.isRunning) {
+      if (!(await this.#tryStartTuner())) {
+        return;
+      }
+    }
+
     this.#applySimFrequency();
 
-    const phase =
-      step.cents === 0 ? "in tune (expect green + PERFECT)" : step.cents > 0 ? "sharp" : "flat";
-    this.dom.devReadout.textContent =
-      `Demo — ${string.letter} string (${string.hz.toFixed(1)} Hz)\n` +
-      `Sim offset: ${step.cents > 0 ? "+" : ""}${step.cents}¢ (${phase})`;
-
-    this.#devDemoTimer = window.setTimeout(() => {
-      this.#devDemoStepIndex += 1;
-      if (this.#devDemoStepIndex >= DEV_DEMO_STEPS.length) {
-        this.#devDemoStepIndex = 0;
-        this.#devDemoStringIndex = (this.#devDemoStringIndex + 1) % GUITAR_STRINGS.length;
+    if (this.#devOpen && this.#devSimulate) {
+      const s = GUITAR_STRINGS.find((g) => g.id === stringId);
+      if (s) {
+        this.dom.devReadout.textContent =
+          `Simulating ${s.letter} (${s.id})\n${s.hz.toFixed(2)} Hz — listen & watch needle`;
       }
-      this.#applyDevDemoStep();
-    }, step.holdMs);
+    }
   }
 
   /** @param {"guitar" | "voice"} mode */
