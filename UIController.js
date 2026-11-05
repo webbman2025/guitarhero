@@ -20,6 +20,7 @@ const SEGMENT_LETTERS = {
 };
 
 const CONFIDENCE_MIN = 0.9;
+const DEV_VOICE_CONFIDENCE_MIN = 0.45;
 const IN_TUNE_CENTS = 3;
 const NEEDLE_MIN = -45;
 const NEEDLE_MAX = 45;
@@ -212,13 +213,14 @@ export class UIController {
     if (this.#engine.isRunning) {
       const buffer = this.#engine.readTimeDomainBuffer();
       if (buffer) {
-        const result = this.#engine.detectPitch(buffer);
+        const voiceTest = this.#isDevVoiceMode();
+        const result = this.#engine.detectPitch(buffer, { relaxGates: voiceTest });
         if (this.#devOpen) {
           this.#updateDevReadoutFromResult(result, buffer);
         }
 
         if (result === false) {
-          if (!this.#devVoiceDebug || !this.#devOpen) {
+          if (!voiceTest) {
             this.dom.statusLabel.textContent = "";
             this.dom.centsLabel.textContent = "";
             this.dom.centsLabel.classList.remove("tuner__cents--perfect");
@@ -226,7 +228,12 @@ export class UIController {
             this.dom.statusLabel.textContent = "Voice: too quiet";
           }
         } else if (result.confidence < CONFIDENCE_MIN) {
-          if (this.#devVoiceDebug && this.#devOpen) {
+          if (voiceTest && result.confidence >= DEV_VOICE_CONFIDENCE_MIN) {
+            this.#applyTuning(result.frequency, {
+              allowPerfect: false,
+              statusHint: "Voice test (needle only)",
+            });
+          } else if (voiceTest) {
             this.dom.statusLabel.textContent = "Voice: keep humming…";
           } else {
             this.dom.statusLabel.textContent = "";
@@ -234,13 +241,17 @@ export class UIController {
             this.dom.centsLabel.classList.remove("tuner__cents--perfect");
           }
         } else {
-          this.#applyTuning(result.frequency);
+          this.#applyTuning(result.frequency, { allowPerfect: true });
         }
       }
     }
 
     this.#smoothNeedle();
     this.#rafId = requestAnimationFrame(() => this.#frame());
+  }
+
+  #isDevVoiceMode() {
+    return this.#devVoiceDebug && !this.#devSimulate && !this.#engine.simulateMode;
   }
 
   /** @param {string} message */
@@ -269,8 +280,12 @@ export class UIController {
       `Hz: ${result.frequency.toFixed(2)}\nconf: ${result.confidence.toFixed(3)}`;
   }
 
-  /** @param {number} frequency */
-  #applyTuning(frequency) {
+  /**
+   * @param {number} frequency
+   * @param {{ allowPerfect?: boolean, statusHint?: string }} [options]
+   */
+  #applyTuning(frequency, options = {}) {
+    const allowPerfect = options.allowPerfect !== false;
     let target = GUITAR_STRINGS.find((s) => s.id === this.#selectedStringId) ?? GUITAR_STRINGS[3];
 
     if (!this.#manualString) {
@@ -284,9 +299,12 @@ export class UIController {
     this.#needleTargetDeg = needleDeg;
 
     const inTune = Math.abs(cents) <= IN_TUNE_CENTS;
-    this.#setSevenSegLetter(target.letter, true, inTune);
+    const showPerfect = allowPerfect && inTune;
+    this.#setSevenSegLetter(target.letter, true, showPerfect);
 
-    if (inTune) {
+    if (options.statusHint) {
+      this.dom.statusLabel.textContent = options.statusHint;
+    } else if (showPerfect) {
       this.dom.statusLabel.textContent = "";
     } else {
       this.dom.statusLabel.textContent = cents > 0 ? "Sharp" : "Flat";
@@ -294,8 +312,8 @@ export class UIController {
 
     const rounded = Math.round(cents);
     const sign = rounded > 0 ? "+" : "";
-    this.dom.centsLabel.classList.toggle("tuner__cents--perfect", inTune);
-    this.dom.centsLabel.textContent = inTune ? "Perfect" : `${sign}${rounded}¢`;
+    this.dom.centsLabel.classList.toggle("tuner__cents--perfect", showPerfect);
+    this.dom.centsLabel.textContent = showPerfect ? "Perfect" : `${sign}${rounded}¢`;
   }
 
   /**

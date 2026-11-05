@@ -153,9 +153,14 @@ export class AudioEngine {
    * @param {Float32Array} buffer
    * @returns {false | { frequency: number, confidence: number, rms: number }}
    */
-  detectPitch(buffer) {
+  /**
+   * @param {Float32Array} buffer
+   * @param {{ relaxGates?: boolean }} [options]
+   */
+  detectPitch(buffer, options = {}) {
+    const rmsGate = options.relaxGates ? 0.004 : RMS_GATE;
     const rms = AudioEngine.computeRms(buffer);
-    if (rms < RMS_GATE) {
+    if (rms < rmsGate) {
       return false;
     }
 
