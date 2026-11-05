@@ -1,0 +1,214 @@
+const FFT_SIZE = 2048;
+const BANDPASS_FREQ = 440;
+const BANDPASS_Q = 1.0;
+const RMS_GATE = 0.015;
+const MIN_FREQ = 70;
+const MAX_FREQ = 420;
+
+export class AudioEngine {
+  /** @type {AudioContext | null} */
+  #context = null;
+  /** @type {MediaStream | null} */
+  #stream = null;
+  /** @type {MediaStreamAudioSourceNode | null} */
+  #source = null;
+  /** @type {BiquadFilterNode | null} */
+  #bandpass = null;
+  /** @type {AnalyserNode | null} */
+  #analyser = null;
+  /** @type {Float32Array | null} */
+  #timeBuffer = null;
+
+  get isRunning() {
+    return this.#context?.state === "running" && this.#stream != null;
+  }
+
+  get sampleRate() {
+    return this.#context?.sampleRate ?? 44100;
+  }
+
+  /**
+   * Create AudioContext and mic graph — call only from a user gesture.
+   */
+  async start() {
+    if (this.isRunning) {
+      return;
+    }
+
+    this.#stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        autoGainControl: false,
+        noiseSuppression: false,
+        channelCount: 1,
+      },
+      video: false,
+    });
+
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    this.#context = new AudioCtx();
+
+    this.#source = this.#context.createMediaStreamSource(this.#stream);
+    this.#bandpass = this.#context.createBiquadFilter();
+    this.#bandpass.type = "bandpass";
+    this.#bandpass.frequency.value = BANDPASS_FREQ;
+    this.#bandpass.Q.value = BANDPASS_Q;
+
+    this.#analyser = this.#context.createAnalyser();
+    this.#analyser.fftSize = FFT_SIZE;
+    this.#analyser.smoothingTimeConstant = 0;
+    this.#timeBuffer = new Float32Array(this.#analyser.fftSize);
+
+    this.#source.connect(this.#bandpass);
+    this.#bandpass.connect(this.#analyser);
+
+    await this.#context.resume();
+  }
+
+  stop() {
+    this.#source?.disconnect();
+    this.#bandpass?.disconnect();
+    this.#analyser?.disconnect();
+    this.#source = null;
+    this.#bandpass = null;
+    this.#analyser = null;
+
+    if (this.#stream) {
+      for (const track of this.#stream.getTracks()) {
+        track.stop();
+      }
+      this.#stream = null;
+    }
+
+    if (this.#context) {
+      void this.#context.close();
+      this.#context = null;
+    }
+    this.#timeBuffer = null;
+  }
+
+  /**
+   * @returns {Float32Array | null}
+   */
+  readTimeDomainBuffer() {
+    if (!this.#analyser || !this.#timeBuffer) {
+      return null;
+    }
+    this.#analyser.getFloatTimeDomainData(this.#timeBuffer);
+    return this.#timeBuffer;
+  }
+
+  /**
+   * RMS gate + autocorrelation pitch detection.
+   * @param {Float32Array} buffer
+   * @returns {false | { frequency: number, confidence: number, rms: number }}
+   */
+  detectPitch(buffer) {
+    const rms = AudioEngine.computeRms(buffer);
+    if (rms < RMS_GATE) {
+      return false;
+    }
+
+    const downFactor = Math.max(1, Math.round(this.sampleRate / 8000));
+    const downsampled = AudioEngine.#downsample(buffer, downFactor);
+    const effectiveRate = this.sampleRate / downFactor;
+    const pitch = AudioEngine.#autocorrelate(downsampled, effectiveRate);
+
+    if (!pitch) {
+      return false;
+    }
+
+    return {
+      frequency: pitch.frequency,
+      confidence: pitch.confidence,
+      rms,
+    };
+  }
+
+  /** @param {Float32Array} samples */
+  static computeRms(samples) {
+    let sum = 0;
+    for (let i = 0; i < samples.length; i++) {
+      const sample = samples[i];
+      sum += sample * sample;
+    }
+    return Math.sqrt(sum / samples.length);
+  }
+
+  /** @param {Float32Array} samples @param {number} factor */
+  static #downsample(samples, factor) {
+    const len = Math.floor(samples.length / factor);
+    const out = new Float32Array(len);
+    for (let i = 0; i < len; i++) {
+      out[i] = samples[i * factor];
+    }
+    return out;
+  }
+
+  /**
+   * @param {Float32Array} samples
+   * @param {number} sampleRate
+   * @returns {{ frequency: number, confidence: number } | null}
+   */
+  static #autocorrelate(samples, sampleRate) {
+    const minPeriod = Math.floor(sampleRate / MAX_FREQ);
+    const maxPeriod = Math.ceil(sampleRate / MIN_FREQ);
+    const size = samples.length;
+
+    let energy = 0;
+    for (let i = 0; i < size; i++) {
+      energy += samples[i] * samples[i];
+    }
+    if (energy <= 1e-10) {
+      return null;
+    }
+
+    let bestOffset = -1;
+    let bestNorm = 0;
+
+    for (let offset = minPeriod; offset <= maxPeriod; offset++) {
+      let corr = 0;
+      for (let i = 0; i < size - offset; i++) {
+        corr += samples[i] * samples[i + offset];
+      }
+      const normalized = corr / energy;
+      if (normalized > bestNorm) {
+        bestNorm = normalized;
+        bestOffset = offset;
+      }
+    }
+
+    if (bestOffset <= 0) {
+      return null;
+    }
+
+    let refinedPeriod = bestOffset;
+    if (bestOffset > minPeriod && bestOffset < maxPeriod) {
+      const prev = AudioEngine.#correlationNorm(samples, bestOffset - 1, energy);
+      const next = AudioEngine.#correlationNorm(samples, bestOffset + 1, energy);
+      const denom = 2 * (2 * bestNorm - prev - next);
+      if (Math.abs(denom) > 1e-9) {
+        refinedPeriod = bestOffset + (prev - next) / denom;
+      }
+    }
+
+    const frequency = sampleRate / refinedPeriod;
+    if (frequency < MIN_FREQ || frequency > MAX_FREQ) {
+      return null;
+    }
+
+    return { frequency, confidence: bestNorm };
+  }
+
+  /** @param {Float32Array} samples @param {number} offset @param {number} energy */
+  static #correlationNorm(samples, offset, energy) {
+    let corr = 0;
+    const size = samples.length;
+    for (let i = 0; i < size - offset; i++) {
+      corr += samples[i] * samples[i + offset];
+    }
+    return corr / energy;
+  }
+}
+
+export { RMS_GATE, FFT_SIZE };

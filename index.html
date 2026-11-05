@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#0066FF" />
+  <title>Guitar Tuner</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="start-overlay" id="start-overlay">
+    <button type="button" class="start-overlay__btn" id="start-overlay-btn">
+      Tap to Start Tuner
+    </button>
+  </div>
+
+  <main class="tuner" id="app-main" aria-hidden="true">
+    <button type="button" class="tuner__stop" id="stop-btn" hidden aria-label="Stop tuner">Stop</button>
+
+    <section class="tuner__gauge" aria-label="Tuning gauge">
+      <svg class="gauge" viewBox="0 0 390 220" role="img" aria-hidden="true">
+        <path class="gauge__arc" d="M 48 168 A 147 147 0 0 1 342 168" fill="none" />
+        <g id="gauge-ticks"></g>
+        <polygon class="gauge__marker" points="195,34 186,52 204,52" />
+        <g id="needle-wrap" transform="rotate(0 195 168)">
+          <path class="gauge__needle" d="M 195 168 L 188 56 L 195 48 L 202 56 Z" />
+          <circle class="gauge__pivot" cx="195" cy="168" r="6" />
+        </g>
+      </svg>
+      <p class="tuner__cents" id="cents-label" aria-live="polite"></p>
+    </section>
+
+    <section class="tuner__display" aria-label="Detected note">
+      <svg class="seven-seg" id="seven-seg" viewBox="0 0 120 180" role="img" aria-hidden="true">
+        <g class="seven-seg__segments">
+          <rect class="seven-seg__seg" data-seg="a" x="18" y="8" width="84" height="14" rx="4" />
+          <rect class="seven-seg__seg" data-seg="b" x="92" y="22" width="14" height="68" rx="4" />
+          <rect class="seven-seg__seg" data-seg="c" x="92" y="96" width="14" height="68" rx="4" />
+          <rect class="seven-seg__seg" data-seg="d" x="18" y="158" width="84" height="14" rx="4" />
+          <rect class="seven-seg__seg" data-seg="e" x="14" y="96" width="14" height="68" rx="4" />
+          <rect class="seven-seg__seg" data-seg="f" x="14" y="22" width="14" height="68" rx="4" />
+          <rect class="seven-seg__seg" data-seg="g" x="18" y="83" width="84" height="14" rx="4" />
+        </g>
+      </svg>
+      <p class="tuner__status" id="status-label" aria-live="polite"></p>
+    </section>
+
+    <nav class="tuner__strings" aria-label="Guitar strings">
+      <button type="button" class="tuner__string" data-string="E2">E</button>
+      <button type="button" class="tuner__string" data-string="A2">A</button>
+      <button type="button" class="tuner__string" data-string="D3">D</button>
+      <button type="button" class="tuner__string tuner__string--active" data-string="G3">G</button>
+      <button type="button" class="tuner__string" data-string="B3">B</button>
+      <button type="button" class="tuner__string" data-string="E4">E</button>
+    </nav>
+  </main>
+
+  <script type="module" src="UIController.js"></script>
+</body>
+</html>
