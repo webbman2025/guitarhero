@@ -50,8 +50,8 @@ export class UIController {
   #devOpen = false;
   /** @type {boolean} */
   #devSimulate = false;
-  /** @type {boolean} */
-  #devVoiceDebug = true;
+  /** @type {"guitar" | "voice"} */
+  #tuningMode = "guitar";
   /** @type {number} */
   #devSimCents = 0;
 
@@ -64,8 +64,8 @@ export class UIController {
    *   devToggle: HTMLButtonElement,
    *   devPanel: HTMLElement,
    *   devSimulate: HTMLInputElement,
-   *   devVoiceDebug: HTMLInputElement,
    *   devSimCents: HTMLInputElement,
+   *   modeButtons: HTMLButtonElement[],
    *   devSimCentsOut: HTMLOutputElement,
    *   devReadout: HTMLElement,
    *   noteDisplay: HTMLElement,
@@ -100,9 +100,14 @@ export class UIController {
       }
     });
 
-    this.dom.devVoiceDebug.addEventListener("change", () => {
-      this.#devVoiceDebug = this.dom.devVoiceDebug.checked;
-    });
+    for (const btn of this.dom.modeButtons) {
+      btn.addEventListener("click", () => {
+        const mode = btn.getAttribute("data-mode");
+        if (mode === "guitar" || mode === "voice") {
+          this.#setTuningMode(mode);
+        }
+      });
+    }
 
     this.dom.devSimCents.addEventListener("input", () => {
       this.#devSimCents = Number(this.dom.devSimCents.value);
@@ -215,23 +220,23 @@ export class UIController {
     if (this.#engine.isRunning) {
       const buffer = this.#engine.readTimeDomainBuffer();
       if (buffer) {
-        const voiceTest = this.#isDevVoiceMode();
-        const result = this.#engine.detectPitch(buffer, { relaxGates: voiceTest });
+        const voiceMode = this.#isVoiceMode();
+        const result = this.#engine.detectPitch(buffer, { relaxGates: voiceMode });
         if (this.#devOpen) {
           this.#updateDevReadoutFromResult(result, buffer);
         }
 
         if (result === false) {
-          this.#clearLivePitch(voiceTest ? "Voice: too quiet" : "");
+          this.#clearLivePitch(voiceMode ? "Voice: too quiet" : "");
         } else if (result.confidence < CONFIDENCE_MIN) {
-          if (voiceTest && result.confidence >= DEV_VOICE_CONFIDENCE_MIN) {
+          if (voiceMode && result.confidence >= DEV_VOICE_CONFIDENCE_MIN) {
             this.#applyChromaticPitch(result.frequency, {
               allowPerfect: false,
             });
           } else {
-            this.#clearLivePitch(voiceTest ? "Voice: keep humming…" : "");
+            this.#clearLivePitch(voiceMode ? "Voice: keep humming…" : "");
           }
-        } else if (voiceTest) {
+        } else if (voiceMode) {
           this.#applyChromaticPitch(result.frequency, { allowPerfect: true });
         } else {
           this.#applyTuning(result.frequency, { allowPerfect: true });
@@ -252,8 +257,22 @@ export class UIController {
     this.#setSevenSegLetter("G", false);
   }
 
-  #isDevVoiceMode() {
-    return this.#devVoiceDebug && !this.#devSimulate && !this.#engine.simulateMode;
+  #isVoiceMode() {
+    return this.#tuningMode === "voice" && !this.#engine.simulateMode;
+  }
+
+  /** @param {"guitar" | "voice"} mode */
+  #setTuningMode(mode) {
+    this.#tuningMode = mode;
+    this.dom.appMain.classList.toggle("tuner--guitar", mode === "guitar");
+    this.dom.appMain.classList.toggle("tuner--voice", mode === "voice");
+    for (const btn of this.dom.modeButtons) {
+      btn.classList.toggle("tuner__mode--active", btn.getAttribute("data-mode") === mode);
+    }
+    this.#clearLivePitch("");
+    if (mode === "guitar") {
+      this.#setSevenSegLetter("G", true);
+    }
   }
 
   /** @param {string} message */
@@ -435,8 +454,8 @@ const stopBtn = document.getElementById("stop-btn");
 const devToggle = document.getElementById("dev-toggle");
 const devPanel = document.getElementById("dev-panel");
 const devSimulate = document.getElementById("dev-simulate");
-const devVoiceDebug = document.getElementById("dev-voice-debug");
 const devSimCents = document.getElementById("dev-sim-cents");
+const modeButtons = [...document.querySelectorAll(".tuner__mode")];
 const devSimCentsOut = document.getElementById("dev-sim-cents-out");
 const devReadout = document.getElementById("dev-readout");
 const noteDisplay = document.getElementById("seven-seg");
@@ -455,8 +474,8 @@ if (
   !(devToggle instanceof HTMLButtonElement) ||
   !(devPanel instanceof HTMLElement) ||
   !(devSimulate instanceof HTMLInputElement) ||
-  !(devVoiceDebug instanceof HTMLInputElement) ||
   !(devSimCents instanceof HTMLInputElement) ||
+  !modeButtons.every((b) => b instanceof HTMLButtonElement) ||
   !(devSimCentsOut instanceof HTMLOutputElement) ||
   !(devReadout instanceof HTMLElement) ||
   !(noteDisplay instanceof SVGSVGElement) ||
@@ -478,8 +497,8 @@ new UIController({
   devToggle,
   devPanel,
   devSimulate,
-  devVoiceDebug,
   devSimCents,
+  modeButtons,
   devSimCentsOut,
   devReadout,
   noteDisplay,
