@@ -2,7 +2,7 @@
  * Bump VERSION on each release that should refresh cached files.
  * Bump VERSION on each release. skipWaiting on install avoids a stuck "waiting" worker on iOS PWA.
  */
-const VERSION = "17";
+const VERSION = "18";
 
 const CACHE = `guitarhero-static-${VERSION}`;
 

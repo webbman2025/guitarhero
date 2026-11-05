@@ -1,6 +1,6 @@
 # Guitar demo samples
 
-Short open-string **acoustic** plucks (~1.2 s), trimmed for demo taps.
+Short open-string **acoustic** plucks (~0.5 s), trimmed for demo taps (attack + brief decay, not long sustains).
 
 | File   | Source note (standard tuning) |
 |--------|-------------------------------|

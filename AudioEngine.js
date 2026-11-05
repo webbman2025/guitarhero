@@ -39,11 +39,9 @@ export class AudioEngine {
   #simToneFilter = null;
   /** @type {BiquadFilterNode | null} */
   #demoBodyFilter = null;
-  /** Steady fundamental for analyser — not affected by pluck envelope. */
-  /** @type {OscillatorNode | null} */
-  #analysisOsc = null;
-  /** @type {GainNode | null} */
-  #analysisGain = null;
+  /** Last simulated pitch (demo/sim UI drives cents; no continuous analysis tone). */
+  /** @type {number} */
+  #simMonitorFrequency = 196;
   /** @type {Map<string, AudioBuffer> | null} */
   #guitarSamples = null;
   /** @type {string} */
@@ -111,10 +109,8 @@ export class AudioEngine {
         this.#guitarSamples = await AudioEngine.#loadGuitarSamples(this.#context);
       }
       this.#simStringId = stringId in GUITAR_SAMPLE_DEFS ? stringId : "G3";
-      this.#buildSimulatedGuitarGraph(frequency, this.#playDemoAudio);
-      if (this.#playDemoAudio) {
-        this.#triggerSimPluck(frequency, this.#simStringId);
-      }
+      this.#simMonitorFrequency = frequency;
+      this.#buildSimulatedGuitarGraph(this.#playDemoAudio);
     } else {
       this.#stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -161,52 +157,32 @@ export class AudioEngine {
     return decoded;
   }
 
-  /**
-   * @param {number} fundamentalHz
-   * @param {boolean} withSpeakerMonitor
-   */
-  #buildSimulatedGuitarGraph(fundamentalHz, withSpeakerMonitor) {
-    if (!this.#context) {
+  /** @param {boolean} withSpeakerMonitor */
+  #buildSimulatedGuitarGraph(withSpeakerMonitor) {
+    if (!this.#context || !withSpeakerMonitor) {
       return;
     }
 
-    this.#analysisOsc = this.#context.createOscillator();
-    this.#analysisGain = this.#context.createGain();
-    this.#analysisOsc.type = "sine";
-    this.#analysisOsc.frequency.value = fundamentalHz;
-    this.#analysisGain.gain.value = 0.42;
-    this.#analysisOsc.connect(this.#analysisGain);
-    this.#analysisGain.connect(this.#analyser);
-    this.#analysisOsc.start();
-
-    if (!withSpeakerMonitor) {
-      return;
-    }
-
-    const body = this.#context.createBiquadFilter();
-    body.type = "peaking";
-    body.frequency.value = 280;
-    body.Q.value = 0.85;
-    body.gain.value = 5;
+    this.#demoBodyFilter = this.#context.createBiquadFilter();
+    this.#demoBodyFilter.type = "lowshelf";
+    this.#demoBodyFilter.frequency.value = 200;
+    this.#demoBodyFilter.gain.value = 2.5;
 
     this.#simToneFilter = this.#context.createBiquadFilter();
     this.#simToneFilter.type = "lowpass";
-    this.#simToneFilter.frequency.value = 7200;
-    this.#simToneFilter.Q.value = 0.35;
+    this.#simToneFilter.frequency.value = 5800;
+    this.#simToneFilter.Q.value = 0.25;
 
     this.#monitorGain = this.#context.createGain();
-    this.#monitorGain.gain.value = AudioEngine.#monitorLevelForFrequency(fundamentalHz);
-    body.connect(this.#simToneFilter);
+    this.#monitorGain.gain.value = AudioEngine.#monitorLevelForFrequency(this.#simMonitorFrequency);
+    this.#demoBodyFilter.connect(this.#simToneFilter);
     this.#simToneFilter.connect(this.#monitorGain);
     this.#monitorGain.connect(this.#context.destination);
-    this.#demoBodyFilter = body;
   }
 
   /** @param {number} fundamentalHz */
-  #setAnalysisFrequency(fundamentalHz) {
-    if (this.#analysisOsc) {
-      this.#analysisOsc.frequency.value = fundamentalHz;
-    }
+  #setSimMonitorLevel(fundamentalHz) {
+    this.#simMonitorFrequency = fundamentalHz;
     if (this.#monitorGain) {
       this.#monitorGain.gain.value = AudioEngine.#monitorLevelForFrequency(fundamentalHz);
     }
@@ -251,13 +227,18 @@ export class AudioEngine {
     const gain = this.#context.createGain();
     src.buffer = buffer;
     src.playbackRate.value = playbackRate;
-    gain.gain.value = 0.92;
     src.connect(gain);
     const monitorIn = this.#demoBodyFilter ?? this.#simToneFilter;
     gain.connect(monitorIn);
+
+    const pluckSec = Math.min(buffer.duration / playbackRate, 0.58);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(1, t + 0.004);
+    gain.gain.exponentialRampToValueAtTime(0.22, t + 0.065);
+    gain.gain.setTargetAtTime(0.0001, t + 0.065, 0.09);
+
     src.start(t);
-    const pluckSec = Math.min(buffer.duration / playbackRate, 1.25);
-    src.stop(t + pluckSec);
+    src.stop(t + pluckSec + 0.02);
     this.#activeSampleSources.push(src);
     src.onended = () => {
       this.#activeSampleSources = this.#activeSampleSources.filter((node) => node !== src);
@@ -286,7 +267,7 @@ export class AudioEngine {
         ? options.stringId
         : this.#simStringId;
     this.#simStringId = stringId;
-    this.#setAnalysisFrequency(frequency);
+    this.#setSimMonitorLevel(frequency);
     if (options.pluck !== false && this.#playDemoAudio) {
       this.#triggerSimPluck(frequency, stringId);
     }
@@ -300,10 +281,8 @@ export class AudioEngine {
       if (this.#monitorGain) {
         this.#monitorGain.gain.value = 0;
       }
-    } else if (this.#monitorGain && this.#analysisOsc) {
-      this.#monitorGain.gain.value = AudioEngine.#monitorLevelForFrequency(
-        this.#analysisOsc.frequency.value,
-      );
+    } else if (this.#monitorGain) {
+      this.#monitorGain.gain.value = AudioEngine.#monitorLevelForFrequency(this.#simMonitorFrequency);
     }
   }
 
@@ -321,18 +300,6 @@ export class AudioEngine {
   stop() {
     this.#stopActiveSamples();
     this.#playDemoAudio = false;
-
-    if (this.#analysisOsc) {
-      try {
-        this.#analysisOsc.stop();
-      } catch {
-        /* already stopped */
-      }
-      this.#analysisOsc.disconnect();
-    }
-    this.#analysisGain?.disconnect();
-    this.#analysisOsc = null;
-    this.#analysisGain = null;
 
     this.#demoBodyFilter?.disconnect();
     this.#simToneFilter?.disconnect();
