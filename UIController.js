@@ -63,6 +63,10 @@ export class UIController {
    *   stopBtn: HTMLButtonElement,
    *   devToggle: HTMLButtonElement,
    *   devPanel: HTMLElement,
+   *   devBackdrop: HTMLElement,
+   *   devDoneBtn: HTMLButtonElement,
+   *   devCurrentMode: HTMLElement,
+   *   devExtra: HTMLElement,
    *   devSimulateBtn: HTMLButtonElement,
    *   devSimCents: HTMLInputElement,
    *   modeButtons: HTMLButtonElement[],
@@ -87,12 +91,19 @@ export class UIController {
 
   #bindEvents() {
     this.dom.devToggle.addEventListener("click", () => {
-      this.#devOpen = !this.#devOpen;
-      this.dom.devPanel.hidden = !this.#devOpen;
-      document.body.classList.toggle("dev-open", this.#devOpen);
-      this.dom.devToggle.classList.toggle("dev-toggle--open", this.#devOpen);
-      this.dom.devToggle.setAttribute("aria-expanded", String(this.#devOpen));
-      this.#updateDevReadout(this.#devOpen ? "Dev panel open" : "Dev panel closed");
+      if (this.#devOpen) {
+        this.#closeDevMenu();
+      } else {
+        this.#openDevMenu();
+      }
+    });
+
+    this.dom.devBackdrop.addEventListener("click", () => {
+      this.#closeDevMenu();
+    });
+
+    this.dom.devDoneBtn.addEventListener("click", () => {
+      this.#closeDevMenu();
     });
 
     this.dom.devSimulateBtn.addEventListener("click", () => {
@@ -263,11 +274,35 @@ export class UIController {
     return this.#tuningMode === "voice" && !this.#engine.simulateMode;
   }
 
+  #openDevMenu() {
+    this.#devOpen = true;
+    this.dom.devPanel.hidden = false;
+    this.dom.devBackdrop.hidden = false;
+    this.dom.devBackdrop.setAttribute("aria-hidden", "false");
+    this.dom.devToggle.classList.add("dev-toggle--open");
+    this.dom.devToggle.setAttribute("aria-expanded", "true");
+    this.#syncDevMenuUi();
+  }
+
+  #closeDevMenu() {
+    this.#devOpen = false;
+    this.dom.devPanel.hidden = true;
+    this.dom.devBackdrop.hidden = true;
+    this.dom.devBackdrop.setAttribute("aria-hidden", "true");
+    this.dom.devToggle.classList.remove("dev-toggle--open");
+    this.dom.devToggle.setAttribute("aria-expanded", "false");
+  }
+
+  #syncDevMenuUi() {
+    this.#updateDevModeLabel();
+    this.dom.devExtra.hidden = !this.#devSimulate;
+  }
+
   /** @param {boolean} enabled */
   #setSimulateEnabled(enabled) {
     this.#devSimulate = enabled;
     this.dom.devSimulateBtn.setAttribute("aria-pressed", String(enabled));
-    this.dom.devSimulateBtn.classList.toggle("dev-panel__btn--active", enabled);
+    this.dom.devExtra.hidden = !enabled;
   }
 
   /** @param {"guitar" | "voice"} mode */
@@ -278,12 +313,21 @@ export class UIController {
     document.body.classList.toggle("mode-guitar", mode === "guitar");
     document.body.classList.toggle("mode-voice", mode === "voice");
     for (const btn of this.dom.modeButtons) {
-      btn.classList.toggle("dev-panel__btn--active", btn.getAttribute("data-mode") === mode);
+      btn.classList.toggle("dev-menu__item--active", btn.getAttribute("data-mode") === mode);
     }
+    this.#updateDevModeLabel();
     this.#clearLivePitch("");
     if (mode === "guitar") {
       this.#setSevenSegLetter("G", true);
     }
+  }
+
+  #updateDevModeLabel() {
+    const labels = {
+      guitar: "Current: Guitar tuning",
+      voice: "Current: Voice test",
+    };
+    this.dom.devCurrentMode.textContent = labels[this.#tuningMode];
   }
 
   /** @param {string} message */
@@ -431,13 +475,7 @@ export class UIController {
   /** @param {string} stringId */
   #setActiveStringButton(stringId) {
     for (const btn of this.dom.stringButtons) {
-      const active = btn.getAttribute("data-string") === stringId;
-      if (btn.classList.contains("tuner__string")) {
-        btn.classList.toggle("tuner__string--active", active);
-      }
-      if (btn.classList.contains("dev-panel__string")) {
-        btn.classList.toggle("dev-panel__string--active", active);
-      }
+      btn.classList.toggle("tuner__string--active", btn.getAttribute("data-string") === stringId);
     }
   }
 
@@ -470,9 +508,13 @@ const appMain = document.getElementById("app-main");
 const stopBtn = document.getElementById("stop-btn");
 const devToggle = document.getElementById("dev-toggle");
 const devPanel = document.getElementById("dev-panel");
+const devBackdrop = document.getElementById("dev-backdrop");
+const devDoneBtn = document.getElementById("dev-done-btn");
+const devCurrentMode = document.getElementById("dev-current-mode");
+const devExtra = document.getElementById("dev-extra");
 const devSimulateBtn = document.getElementById("dev-simulate-btn");
 const devSimCents = document.getElementById("dev-sim-cents");
-const modeButtons = [...document.querySelectorAll(".dev-panel__btn[data-mode]")];
+const modeButtons = [...document.querySelectorAll(".dev-menu__item[data-mode]")];
 const devSimCentsOut = document.getElementById("dev-sim-cents-out");
 const devReadout = document.getElementById("dev-readout");
 const noteDisplay = document.getElementById("seven-seg");
@@ -480,10 +522,7 @@ const centsLabel = document.getElementById("cents-label");
 const statusLabel = document.getElementById("status-label");
 const needleWrap = document.getElementById("needle-wrap");
 const ticksGroup = document.getElementById("gauge-ticks");
-const stringButtons = [
-  ...document.querySelectorAll(".tuner__string"),
-  ...document.querySelectorAll(".dev-panel__string"),
-];
+const stringButtons = [...document.querySelectorAll(".tuner__string")];
 const segElements = [...document.querySelectorAll(".seven-seg__seg")];
 
 if (
@@ -493,6 +532,10 @@ if (
   !(stopBtn instanceof HTMLButtonElement) ||
   !(devToggle instanceof HTMLButtonElement) ||
   !(devPanel instanceof HTMLElement) ||
+  !(devBackdrop instanceof HTMLElement) ||
+  !(devDoneBtn instanceof HTMLButtonElement) ||
+  !(devCurrentMode instanceof HTMLElement) ||
+  !(devExtra instanceof HTMLElement) ||
   !(devSimulateBtn instanceof HTMLButtonElement) ||
   !(devSimCents instanceof HTMLInputElement) ||
   !modeButtons.every((b) => b instanceof HTMLButtonElement) ||
@@ -516,6 +559,10 @@ new UIController({
   stopBtn,
   devToggle,
   devPanel,
+  devBackdrop,
+  devDoneBtn,
+  devCurrentMode,
+  devExtra,
   devSimulateBtn,
   devSimCents,
   modeButtons,

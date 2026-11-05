@@ -8,44 +8,52 @@
   <title>Guitar Tuner</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body>
+<body class="mode-guitar">
   <button type="button" class="dev-toggle" id="dev-toggle" aria-expanded="false" aria-controls="dev-panel">
     Dev
   </button>
 
-  <aside class="dev-panel" id="dev-panel" hidden>
-    <p class="dev-panel__title">Developer</p>
+  <div class="dev-backdrop" id="dev-backdrop" hidden aria-hidden="true"></div>
 
-    <div class="dev-panel__modes" role="group" aria-label="Tuning mode">
-      <button type="button" class="dev-panel__btn dev-panel__btn--active" data-mode="guitar">Guitar mode</button>
-      <button type="button" class="dev-panel__btn" data-mode="voice">Voice mode</button>
+  <aside class="dev-menu" id="dev-panel" hidden>
+    <p class="dev-menu__heading">Dev options</p>
+    <p class="dev-menu__current" id="dev-current-mode">Current: Guitar tuning</p>
+
+    <ul class="dev-menu__list" role="menu">
+      <li role="none">
+        <button type="button" class="dev-menu__item dev-menu__item--active" data-mode="guitar" role="menuitem">
+          Guitar tuning
+        </button>
+      </li>
+      <li role="none">
+        <button type="button" class="dev-menu__item" data-mode="voice" role="menuitem">
+          Voice test (frequency)
+        </button>
+      </li>
+      <li role="none">
+        <button
+          type="button"
+          class="dev-menu__item"
+          id="dev-simulate-btn"
+          data-option="simulate"
+          aria-pressed="false"
+          role="menuitem"
+        >
+          Simulate tone (no mic)
+        </button>
+      </li>
+    </ul>
+
+    <div class="dev-menu__extra" id="dev-extra" hidden>
+      <label class="dev-menu__slider">
+        <span>Sim detune (¢)</span>
+        <input type="range" id="dev-sim-cents" min="-25" max="25" value="0" />
+        <output id="dev-sim-cents-out">0</output>
+      </label>
+      <pre class="dev-menu__readout" id="dev-readout" aria-live="polite"></pre>
     </div>
 
-    <button
-      type="button"
-      class="dev-panel__btn dev-panel__btn--wide"
-      id="dev-simulate-btn"
-      aria-pressed="false"
-    >
-      Simulate tone (no guitar)
-    </button>
-
-    <label class="dev-panel__slider">
-      <span>Sim detune (¢)</span>
-      <input type="range" id="dev-sim-cents" min="-25" max="25" value="0" />
-      <output id="dev-sim-cents-out">0</output>
-    </label>
-
-    <nav class="dev-panel__strings dev-panel__strings--guitar" aria-label="Guitar strings">
-      <button type="button" class="dev-panel__string" data-string="E2">E</button>
-      <button type="button" class="dev-panel__string" data-string="A2">A</button>
-      <button type="button" class="dev-panel__string" data-string="D3">D</button>
-      <button type="button" class="dev-panel__string dev-panel__string--active" data-string="G3">G</button>
-      <button type="button" class="dev-panel__string" data-string="B3">B</button>
-      <button type="button" class="dev-panel__string" data-string="E4">E</button>
-    </nav>
-
-    <pre class="dev-panel__readout" id="dev-readout" aria-live="polite">Tap Dev to configure</pre>
+    <button type="button" class="dev-menu__done" id="dev-done-btn">Done</button>
   </aside>
 
   <div class="start-overlay" id="start-overlay">
