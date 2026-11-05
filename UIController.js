@@ -428,12 +428,14 @@ export class UIController {
       const simMode = this.#engine.simulateMode;
 
       if (simMode && !voiceMode) {
-        const freq = this.#simFrequencyForSelectedString();
-        this.#applyTuning(freq, { allowPerfect: true });
+        const target =
+          GUITAR_STRINGS.find((s) => s.id === this.#selectedStringId) ?? GUITAR_STRINGS[3];
+        this.#applyTuningFromCents(target, this.#devSimCents, { allowPerfect: true });
         if (this.#devOpen) {
+          const freq = this.#simFrequencyForSelectedString();
           this.dom.devReadout.textContent =
-            `Demo sim · ${freq.toFixed(2)} Hz\n` +
-            `Target offset: ${this.#devSimCents > 0 ? "+" : ""}${this.#devSimCents}¢`;
+            `Demo · ${target.letter} (${target.id})\n` +
+            `${freq.toFixed(2)} Hz · needle at ${this.#devSimCents > 0 ? "+" : ""}${this.#devSimCents}¢`;
         }
       } else {
         const buffer = this.#engine.readTimeDomainBuffer();
@@ -598,6 +600,12 @@ export class UIController {
 
     this.#applySimFrequency();
 
+    if (this.#engine.simulateMode) {
+      const target =
+        GUITAR_STRINGS.find((s) => s.id === stringId) ?? GUITAR_STRINGS[3];
+      this.#applyTuningFromCents(target, this.#devSimCents, { allowPerfect: true });
+    }
+
     if (this.#devOpen && (this.#devSimulate || this.#devDemoActive)) {
       const s = GUITAR_STRINGS.find((g) => g.id === stringId);
       if (s) {
@@ -660,6 +668,40 @@ export class UIController {
     this.dom.devReadout.textContent =
       `mode: ${mode}\nrms: ${result.rms.toFixed(4)}\n` +
       `Hz: ${result.frequency.toFixed(2)}\nconf: ${result.confidence.toFixed(3)}`;
+  }
+
+  /**
+   * Demo / sim: drive needle from exact cent offset (matches gauge teaching targets).
+   * @param {{ id: string, letter: string, hz: number }} target
+   * @param {number} cents
+   * @param {{ allowPerfect?: boolean, statusHint?: string }} [options]
+   */
+  #applyTuningFromCents(target, cents, options = {}) {
+    const allowPerfect = options.allowPerfect !== false;
+    this.#needleTargetDeg = UIController.#centsToNeedleDegrees(cents);
+    this.#needleDeg = this.#needleTargetDeg;
+    this.dom.needleWrap.setAttribute(
+      "transform",
+      `rotate(${this.#needleDeg.toFixed(2)} ${NEEDLE_PIVOT_X} ${NEEDLE_PIVOT_Y})`,
+    );
+
+    const inTune = Math.abs(cents) <= IN_TUNE_CENTS;
+    const showPerfect = allowPerfect && inTune;
+    this.#setSevenSegLetter(target.letter, true, showPerfect);
+
+    if (options.statusHint) {
+      this.dom.statusLabel.textContent = options.statusHint;
+    } else if (showPerfect) {
+      this.dom.statusLabel.textContent = "";
+    } else {
+      this.dom.statusLabel.textContent = cents > 0 ? "Sharp" : "Flat";
+    }
+
+    const rounded = Math.round(cents);
+    const sign = rounded > 0 ? "+" : "";
+    this.dom.centsLabel.classList.toggle("tuner__cents--perfect", showPerfect);
+    this.dom.centsLabel.textContent = showPerfect ? "Perfect" : `${sign}${rounded}¢`;
+    this.#setPerfectFeedback(showPerfect);
   }
 
   /**
@@ -788,8 +830,9 @@ export class UIController {
   }
 
   #smoothNeedle() {
-    const smoothing = this.#engine.simulateMode ? 0.14 : 0.22;
-    this.#needleDeg += (this.#needleTargetDeg - this.#needleDeg) * smoothing;
+    if (!this.#engine.simulateMode) {
+      this.#needleDeg += (this.#needleTargetDeg - this.#needleDeg) * 0.22;
+    }
     this.dom.needleWrap.setAttribute(
       "transform",
       `rotate(${this.#needleDeg.toFixed(2)} ${NEEDLE_PIVOT_X} ${NEEDLE_PIVOT_Y})`,
