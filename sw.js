@@ -2,7 +2,7 @@
  * Bump VERSION on each release that should refresh cached files.
  * Install does not skipWaiting — updates apply on next full app open by default.
  */
-const VERSION = "1";
+const VERSION = "2";
 
 const CACHE = `guitarhero-static-${VERSION}`;
 
@@ -41,7 +41,7 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("message", (event) => {
   if (event.data?.type === "SKIP_WAITING") {
-    self.skipWaiting();
+    event.waitUntil(self.skipWaiting());
   }
 });
 

@@ -6,8 +6,6 @@ const updateDismiss = document.getElementById("pwa-update-dismiss");
 
 /** @type {ServiceWorkerRegistration | null} */
 let registration = null;
-/** Reload only after the user taps Reload — not on silent "next open" activation. */
-let userInitiatedUpdate = false;
 let refreshing = false;
 
 if ("serviceWorker" in navigator) {
@@ -15,13 +13,21 @@ if ("serviceWorker" in navigator) {
     void registerServiceWorker();
   });
 
-  navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (!userInitiatedUpdate || refreshing) {
-      return;
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      void refreshRegistrationAndBar();
     }
-    refreshing = true;
-    window.location.reload();
   });
+}
+
+function hideUpdateBar() {
+  if (updateBar instanceof HTMLElement) {
+    updateBar.hidden = true;
+  }
+  if (updateBtn instanceof HTMLButtonElement) {
+    updateBtn.disabled = false;
+    updateBtn.textContent = "Reload";
+  }
 }
 
 function showUpdateBarIfNeeded() {
@@ -29,11 +35,23 @@ function showUpdateBarIfNeeded() {
     return;
   }
   if (sessionStorage.getItem(UPDATE_DISMISS_KEY) === "1") {
+    hideUpdateBar();
     return;
   }
   if (registration?.waiting && navigator.serviceWorker.controller) {
     updateBar.hidden = false;
+    return;
   }
+  hideUpdateBar();
+}
+
+async function refreshRegistrationAndBar() {
+  try {
+    registration = await navigator.serviceWorker.getRegistration();
+  } catch {
+    registration = null;
+  }
+  showUpdateBarIfNeeded();
 }
 
 async function registerServiceWorker() {
@@ -50,8 +68,19 @@ async function registerServiceWorker() {
           sessionStorage.removeItem(UPDATE_DISMISS_KEY);
           showUpdateBarIfNeeded();
         }
+        if (installing.state === "activated") {
+          hideUpdateBar();
+        }
       });
     });
+
+    if (registration.waiting) {
+      registration.waiting.addEventListener("statechange", () => {
+        if (registration?.waiting?.state === "activated") {
+          hideUpdateBar();
+        }
+      });
+    }
 
     showUpdateBarIfNeeded();
   } catch (err) {
@@ -59,21 +88,70 @@ async function registerServiceWorker() {
   }
 }
 
-if (updateBtn instanceof HTMLButtonElement) {
-  updateBtn.addEventListener("click", () => {
-    userInitiatedUpdate = true;
-    const waiting = registration?.waiting;
-    if (waiting) {
-      waiting.postMessage({ type: "SKIP_WAITING" });
+async function applyWaitingUpdate() {
+  if (refreshing) {
+    return;
+  }
+
+  if (updateBtn instanceof HTMLButtonElement) {
+    updateBtn.disabled = true;
+    updateBtn.textContent = "Reloading…";
+  }
+
+  const reg = registration ?? (await navigator.serviceWorker.getRegistration());
+  const waiting = reg?.waiting;
+
+  if (!waiting) {
+    hideUpdateBar();
+    refreshing = true;
+    window.location.reload();
+    return;
+  }
+
+  const finishReload = () => {
+    if (refreshing) {
       return;
     }
+    refreshing = true;
+    sessionStorage.removeItem(UPDATE_DISMISS_KEY);
+    hideUpdateBar();
     window.location.reload();
+  };
+
+  const onStateChange = () => {
+    if (waiting.state === "activated") {
+      waiting.removeEventListener("statechange", onStateChange);
+      finishReload();
+    }
+  };
+  waiting.addEventListener("statechange", onStateChange);
+
+  const onControllerChange = () => {
+    navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
+    finishReload();
+  };
+  navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
+
+  try {
+    waiting.postMessage({ type: "SKIP_WAITING" });
+  } catch (err) {
+    console.warn("skipWaiting message failed", err);
+  }
+
+  window.setTimeout(() => {
+    finishReload();
+  }, 1200);
+}
+
+if (updateBtn instanceof HTMLButtonElement) {
+  updateBtn.addEventListener("click", () => {
+    void applyWaitingUpdate();
   });
 }
 
-if (updateDismiss instanceof HTMLButtonElement && updateBar instanceof HTMLElement) {
+if (updateDismiss instanceof HTMLButtonElement) {
   updateDismiss.addEventListener("click", () => {
-    updateBar.hidden = true;
+    hideUpdateBar();
     sessionStorage.setItem(UPDATE_DISMISS_KEY, "1");
   });
 }
