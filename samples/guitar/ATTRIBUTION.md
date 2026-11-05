@@ -1,14 +1,16 @@
 # Guitar demo samples
 
-Open-string plucks (standard tuning) from the [dataset_PRS](https://github.com/Anthaudio/dataset_PRS) recordings (PRS SE electric guitar, 44.1 kHz WAV).
+Short open-string **acoustic** plucks (~1.2 s), trimmed for demo taps.
 
-| File   | Source              |
-|--------|---------------------|
-| e2.wav | `E1_E1_both.wav`    |
-| a2.wav | `A_A1_both.wav`     |
-| d3.wav | `D_D1_both.wav`     |
-| g3.wav | `G_G1_both.wav`     |
-| b3.wav | `B_B2_both.wav`     |
-| e4.wav | `E2_E2_both.wav`    |
+| File   | Source note (standard tuning) |
+|--------|-------------------------------|
+| e2.wav | E2 |
+| a2.wav | A2 |
+| d3.wav | D3 |
+| g3.wav | G3 |
+| b3.wav | B3 |
+| e4.wav | E4 |
 
-Used only for **Play tuner demo** speaker audio. Mic tuning and dev **Simulate** (without demo) are silent; pitch in simulate/demo still uses a synthetic analysis tone, not these files.
+Derived from the **guitar-acoustic** set in [tonejs-instruments](https://github.com/nbrosowsky/tonejs-instruments) (`samples/guitar-acoustic/*.wav`), processed (trim, fade, band-limit) for this app.
+
+Used only for **Play tuner demo** speaker output. Mic tuning and dev **Simulate** stay silent; pitch for the needle uses a separate internal analysis tone.

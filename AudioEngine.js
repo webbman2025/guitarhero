@@ -37,6 +37,8 @@ export class AudioEngine {
   #monitorGain = null;
   /** @type {BiquadFilterNode | null} */
   #simToneFilter = null;
+  /** @type {BiquadFilterNode | null} */
+  #demoBodyFilter = null;
   /** Steady fundamental for analyser — not affected by pluck envelope. */
   /** @type {OscillatorNode | null} */
   #analysisOsc = null;
@@ -181,15 +183,23 @@ export class AudioEngine {
       return;
     }
 
+    const body = this.#context.createBiquadFilter();
+    body.type = "peaking";
+    body.frequency.value = 280;
+    body.Q.value = 0.85;
+    body.gain.value = 5;
+
     this.#simToneFilter = this.#context.createBiquadFilter();
     this.#simToneFilter.type = "lowpass";
-    this.#simToneFilter.frequency.value = 5200;
-    this.#simToneFilter.Q.value = 0.45;
+    this.#simToneFilter.frequency.value = 7200;
+    this.#simToneFilter.Q.value = 0.35;
 
     this.#monitorGain = this.#context.createGain();
     this.#monitorGain.gain.value = AudioEngine.#monitorLevelForFrequency(fundamentalHz);
+    body.connect(this.#simToneFilter);
     this.#simToneFilter.connect(this.#monitorGain);
     this.#monitorGain.connect(this.#context.destination);
+    this.#demoBodyFilter = body;
   }
 
   /** @param {number} fundamentalHz */
@@ -243,9 +253,11 @@ export class AudioEngine {
     src.playbackRate.value = playbackRate;
     gain.gain.value = 0.92;
     src.connect(gain);
-    gain.connect(this.#simToneFilter);
+    const monitorIn = this.#demoBodyFilter ?? this.#simToneFilter;
+    gain.connect(monitorIn);
     src.start(t);
-    src.stop(t + Math.min(buffer.duration / playbackRate, 2.1));
+    const pluckSec = Math.min(buffer.duration / playbackRate, 1.25);
+    src.stop(t + pluckSec);
     this.#activeSampleSources.push(src);
     src.onended = () => {
       this.#activeSampleSources = this.#activeSampleSources.filter((node) => node !== src);
@@ -322,8 +334,10 @@ export class AudioEngine {
     this.#analysisOsc = null;
     this.#analysisGain = null;
 
+    this.#demoBodyFilter?.disconnect();
     this.#simToneFilter?.disconnect();
     this.#monitorGain?.disconnect();
+    this.#demoBodyFilter = null;
     this.#monitorGain = null;
     this.#simToneFilter = null;
     this.#guitarSamples = null;
