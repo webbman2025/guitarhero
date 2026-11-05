@@ -35,7 +35,7 @@ const GAUGE_RADIUS = 147;
 const MIC_GRANTED_STORAGE_KEY = "guitar_tuner_mic_granted";
 
 /** Sim/demo: repeated taps on the same string move toward in tune. */
-const SIM_TAP_CENTS = [-18, -10, -4, 0];
+const SIM_TAP_CENTS = [-16, -7, 0];
 
 export class UIController {
   /** @type {AudioEngine} */
@@ -395,7 +395,7 @@ export class UIController {
 
   #applySimFrequency() {
     if (this.#engine.simulateMode) {
-      this.#engine.setSimulatedFrequency(this.#simFrequencyForSelectedString());
+      this.#engine.setSimulatedFrequency(this.#simFrequencyForSelectedString(), { pluck: true });
     }
   }
 
@@ -545,7 +545,7 @@ export class UIController {
     this.#closeDevMenu();
     void this.#onStringButtonTap(this.#selectedStringId);
     this.dom.devReadout.textContent =
-      "Demo — tap a string repeatedly: flat → closer → PERFECT (4 taps).\nSwitch strings to start flat again.";
+      "Demo — tap the same letter 3 times: flat → closer → PERFECT.\nEach string (E, A, D, G, B, E) works the same way.";
   }
 
   /** @param {string | null} stringId */
@@ -594,8 +594,8 @@ export class UIController {
         const tapsLeft = SIM_TAP_CENTS.length - 1 - this.#simTapPhaseIndex;
         const hint =
           cents === 0
-            ? "PERFECT — tap again to practice from flat"
-            : `${tapsLeft} more tap${tapsLeft === 1 ? "" : "s"} on this string for PERFECT`;
+            ? "PERFECT — tap this letter again to start from flat"
+            : `${tapsLeft} more tap${tapsLeft === 1 ? "" : "s"} on this letter for PERFECT`;
         this.dom.devReadout.textContent =
           `${s.letter} (${s.id}) · ${s.hz.toFixed(1)} Hz\n` +
           `Sim: ${cents > 0 ? "+" : ""}${cents}¢ — ${hint}`;

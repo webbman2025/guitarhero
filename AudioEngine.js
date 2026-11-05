@@ -5,6 +5,15 @@ const RMS_GATE = 0.015;
 const MIN_FREQ = 70;
 const MAX_FREQ = 420;
 
+/** Harmonic mix approximating a plucked string (fundamental stays dominant for pitch). */
+const GUITAR_PARTIALS = [
+  { ratio: 1, level: 1, wave: "triangle" },
+  { ratio: 2, level: 0.52, wave: "sine" },
+  { ratio: 3, level: 0.27, wave: "sine" },
+  { ratio: 4, level: 0.14, wave: "sine" },
+  { ratio: 5, level: 0.07, wave: "sine" },
+];
+
 export class AudioEngine {
   /** @type {AudioContext | null} */
   #context = null;
@@ -20,16 +29,14 @@ export class AudioEngine {
   #timeBuffer = null;
   /** @type {boolean} */
   #simulateMode = false;
-  /** @type {OscillatorNode | null} */
-  #oscillator = null;
   /** @type {GainNode | null} */
   #simGain = null;
   /** @type {GainNode | null} */
   #monitorGain = null;
-  /** @type {OscillatorNode | null} */
-  #harmonicOsc = null;
-  /** @type {GainNode | null} */
-  #harmonicGain = null;
+  /** @type {BiquadFilterNode | null} */
+  #simToneFilter = null;
+  /** @type {{ osc: OscillatorNode, level: GainNode, ratio: number }[]} */
+  #simPartials = [];
 
   get isRunning() {
     return (
@@ -82,29 +89,8 @@ export class AudioEngine {
     this.#timeBuffer = new Float32Array(this.#analyser.fftSize);
 
     if (simulate) {
-      this.#oscillator = this.#context.createOscillator();
-      this.#simGain = this.#context.createGain();
-      this.#monitorGain = this.#context.createGain();
-      this.#oscillator.type = "sine";
-      this.#oscillator.frequency.value = frequency;
-      this.#simGain.gain.value = 0.45;
-      this.#oscillator.connect(this.#simGain);
-      // Bypass 440 Hz bandpass — guitar strings are ~82–330 Hz.
-      this.#simGain.connect(this.#analyser);
-
-      this.#monitorGain.gain.value = AudioEngine.#monitorLevelForFrequency(frequency);
-      this.#simGain.connect(this.#monitorGain);
-      this.#monitorGain.connect(this.#context.destination);
-
-      this.#harmonicOsc = this.#context.createOscillator();
-      this.#harmonicGain = this.#context.createGain();
-      this.#harmonicOsc.type = "sine";
-      AudioEngine.#syncHarmonicMonitor(this.#harmonicOsc, this.#harmonicGain, frequency);
-      this.#harmonicOsc.connect(this.#harmonicGain);
-      this.#harmonicGain.connect(this.#monitorGain);
-
-      this.#oscillator.start();
-      this.#harmonicOsc.start();
+      this.#buildSimulatedGuitarGraph(frequency);
+      this.#triggerSimPluck();
     } else {
       this.#stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -124,6 +110,84 @@ export class AudioEngine {
     await this.#context.resume();
   }
 
+  /** @param {number} fundamentalHz */
+  #buildSimulatedGuitarGraph(fundamentalHz) {
+    if (!this.#context) {
+      return;
+    }
+
+    this.#simGain = this.#context.createGain();
+    this.#simGain.gain.value = 0.0001;
+
+    this.#simToneFilter = this.#context.createBiquadFilter();
+    this.#simToneFilter.type = "lowpass";
+    this.#simToneFilter.frequency.value = 2800;
+    this.#simToneFilter.Q.value = 0.65;
+
+    this.#monitorGain = this.#context.createGain();
+    this.#monitorGain.gain.value = AudioEngine.#monitorLevelForFrequency(fundamentalHz);
+
+    for (const partial of GUITAR_PARTIALS) {
+      const osc = this.#context.createOscillator();
+      const level = this.#context.createGain();
+      osc.type = partial.wave;
+      osc.frequency.value = fundamentalHz * partial.ratio;
+      level.gain.value = partial.level * 0.11;
+      osc.connect(level);
+      level.connect(this.#simGain);
+      osc.start();
+      this.#simPartials.push({ osc, level, ratio: partial.ratio });
+    }
+
+    this.#simGain.connect(this.#simToneFilter);
+    this.#simToneFilter.connect(this.#analyser);
+    this.#simGain.connect(this.#monitorGain);
+    this.#monitorGain.connect(this.#context.destination);
+  }
+
+  /** @param {number} fundamentalHz */
+  #setPartialFrequencies(fundamentalHz) {
+    for (const { osc, ratio } of this.#simPartials) {
+      osc.frequency.value = fundamentalHz * ratio;
+    }
+    if (this.#monitorGain) {
+      this.#monitorGain.gain.value = AudioEngine.#monitorLevelForFrequency(fundamentalHz);
+    }
+  }
+
+  #triggerSimPluck() {
+    if (!this.#context || !this.#simGain) {
+      return;
+    }
+
+    const t = this.#context.currentTime;
+    const peak = 0.72;
+    const sustain = 0.42;
+
+    this.#simGain.gain.cancelScheduledValues(t);
+    this.#simGain.gain.setValueAtTime(0.0001, t);
+    this.#simGain.gain.exponentialRampToValueAtTime(peak, t + 0.01);
+    this.#simGain.gain.exponentialRampToValueAtTime(sustain, t + 0.09);
+    this.#simGain.gain.setTargetAtTime(sustain, t + 0.09, 1.4);
+
+    const sr = this.#context.sampleRate;
+    const pickSamples = Math.max(1, Math.floor(sr * 0.006));
+    const pick = this.#context.createBuffer(1, pickSamples, sr);
+    const data = pick.getChannelData(0);
+    for (let i = 0; i < pickSamples; i++) {
+      const decay = 1 - i / pickSamples;
+      data[i] = (Math.random() * 2 - 1) * decay;
+    }
+    const pickSrc = this.#context.createBufferSource();
+    const pickGain = this.#context.createGain();
+    pickSrc.buffer = pick;
+    pickGain.gain.value = 0.08;
+    pickSrc.connect(pickGain);
+    pickGain.connect(this.#simGain);
+    pickSrc.start(t);
+    pickSrc.stop(t + 0.02);
+  }
+
   async suspend() {
     if (this.#context?.state === "running") {
       await this.#context.suspend();
@@ -136,69 +200,45 @@ export class AudioEngine {
     }
   }
 
-  /** @param {number} frequency */
-  setSimulatedFrequency(frequency) {
-    if (this.#oscillator) {
-      this.#oscillator.frequency.value = frequency;
-    }
-    if (this.#monitorGain) {
-      this.#monitorGain.gain.value = AudioEngine.#monitorLevelForFrequency(frequency);
-    }
-    if (this.#harmonicOsc && this.#harmonicGain) {
-      AudioEngine.#syncHarmonicMonitor(this.#harmonicOsc, this.#harmonicGain, frequency);
+  /**
+   * @param {number} frequency
+   * @param {{ pluck?: boolean }} [options]
+   */
+  setSimulatedFrequency(frequency, options = {}) {
+    this.#setPartialFrequencies(frequency);
+    if (options.pluck !== false) {
+      this.#triggerSimPluck();
     }
   }
 
-  /** Low open E (~82 Hz) is hard to hear on phone speakers — boost monitor + 2× harmonic. */
+  /** Low open E (~82 Hz) is hard to hear on phone speakers — boost monitor level. */
   static #monitorLevelForFrequency(frequency) {
     if (frequency < 95) {
-      return 0.28;
+      return 0.32;
     }
     if (frequency < 130) {
-      return 0.18;
+      return 0.2;
     }
-    return 0.12;
-  }
-
-  /**
-   * @param {OscillatorNode} harmonicOsc
-   * @param {GainNode} harmonicGain
-   * @param {number} fundamentalHz
-   */
-  static #syncHarmonicMonitor(harmonicOsc, harmonicGain, fundamentalHz) {
-    if (fundamentalHz < 130) {
-      harmonicOsc.frequency.value = fundamentalHz * 2;
-      harmonicGain.gain.value = fundamentalHz < 95 ? 0.35 : 0.18;
-    } else {
-      harmonicGain.gain.value = 0;
-    }
+    return 0.14;
   }
 
   stop() {
-    if (this.#oscillator) {
+    for (const { osc, level } of this.#simPartials) {
       try {
-        this.#oscillator.stop();
+        osc.stop();
       } catch {
         /* already stopped */
       }
-      this.#oscillator.disconnect();
+      osc.disconnect();
+      level.disconnect();
     }
-    if (this.#harmonicOsc) {
-      try {
-        this.#harmonicOsc.stop();
-      } catch {
-        /* already stopped */
-      }
-      this.#harmonicOsc.disconnect();
-    }
-    this.#harmonicGain?.disconnect();
+    this.#simPartials = [];
+    this.#simToneFilter?.disconnect();
     this.#simGain?.disconnect();
     this.#monitorGain?.disconnect();
-    this.#oscillator = null;
     this.#simGain = null;
     this.#monitorGain = null;
-    this.#harmonicOsc = null;
-    this.#harmonicGain = null;
+    this.#simToneFilter = null;
     this.#simulateMode = false;
 
     this.#source?.disconnect();
@@ -299,21 +339,21 @@ export class AudioEngine {
     for (let i = 0; i < size; i++) {
       energy += samples[i] * samples[i];
     }
-    if (energy <= 1e-10) {
+    if (energy < 1e-8) {
       return null;
     }
 
     let bestOffset = -1;
-    let bestNorm = 0;
+    let bestCorr = 0;
 
     for (let offset = minPeriod; offset <= maxPeriod; offset++) {
       let corr = 0;
       for (let i = 0; i < size - offset; i++) {
         corr += samples[i] * samples[i + offset];
       }
-      const normalized = corr / energy;
-      if (normalized > bestNorm) {
-        bestNorm = normalized;
+      corr /= size - offset;
+      if (corr > bestCorr) {
+        bestCorr = corr;
         bestOffset = offset;
       }
     }
@@ -322,33 +362,13 @@ export class AudioEngine {
       return null;
     }
 
-    let refinedPeriod = bestOffset;
-    if (bestOffset > minPeriod && bestOffset < maxPeriod) {
-      const prev = AudioEngine.#correlationNorm(samples, bestOffset - 1, energy);
-      const next = AudioEngine.#correlationNorm(samples, bestOffset + 1, energy);
-      const denom = 2 * (2 * bestNorm - prev - next);
-      if (Math.abs(denom) > 1e-9) {
-        refinedPeriod = bestOffset + (prev - next) / denom;
-      }
-    }
+    const frequency = sampleRate / bestOffset;
+    const confidence = Math.min(1, Math.max(0, bestCorr / (energy / size + 1e-8)));
 
-    const frequency = sampleRate / refinedPeriod;
     if (frequency < MIN_FREQ || frequency > MAX_FREQ) {
       return null;
     }
 
-    return { frequency, confidence: bestNorm };
-  }
-
-  /** @param {Float32Array} samples @param {number} offset @param {number} energy */
-  static #correlationNorm(samples, offset, energy) {
-    let corr = 0;
-    const size = samples.length;
-    for (let i = 0; i < size - offset; i++) {
-      corr += samples[i] * samples[i + offset];
-    }
-    return corr / energy;
+    return { frequency, confidence };
   }
 }
-
-export { RMS_GATE, FFT_SIZE };
