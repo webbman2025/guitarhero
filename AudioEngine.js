@@ -26,6 +26,10 @@ export class AudioEngine {
   #simGain = null;
   /** @type {GainNode | null} */
   #monitorGain = null;
+  /** @type {OscillatorNode | null} */
+  #harmonicOsc = null;
+  /** @type {GainNode | null} */
+  #harmonicGain = null;
 
   get isRunning() {
     return (
@@ -84,13 +88,23 @@ export class AudioEngine {
       this.#oscillator.type = "sine";
       this.#oscillator.frequency.value = frequency;
       this.#simGain.gain.value = 0.45;
-      this.#monitorGain.gain.value = 0.12;
       this.#oscillator.connect(this.#simGain);
       // Bypass 440 Hz bandpass — guitar strings are ~82–330 Hz.
       this.#simGain.connect(this.#analyser);
+
+      this.#monitorGain.gain.value = AudioEngine.#monitorLevelForFrequency(frequency);
       this.#simGain.connect(this.#monitorGain);
       this.#monitorGain.connect(this.#context.destination);
+
+      this.#harmonicOsc = this.#context.createOscillator();
+      this.#harmonicGain = this.#context.createGain();
+      this.#harmonicOsc.type = "sine";
+      AudioEngine.#syncHarmonicMonitor(this.#harmonicOsc, this.#harmonicGain, frequency);
+      this.#harmonicOsc.connect(this.#harmonicGain);
+      this.#harmonicGain.connect(this.#monitorGain);
+
       this.#oscillator.start();
+      this.#harmonicOsc.start();
     } else {
       this.#stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -127,6 +141,37 @@ export class AudioEngine {
     if (this.#oscillator) {
       this.#oscillator.frequency.value = frequency;
     }
+    if (this.#monitorGain) {
+      this.#monitorGain.gain.value = AudioEngine.#monitorLevelForFrequency(frequency);
+    }
+    if (this.#harmonicOsc && this.#harmonicGain) {
+      AudioEngine.#syncHarmonicMonitor(this.#harmonicOsc, this.#harmonicGain, frequency);
+    }
+  }
+
+  /** Low open E (~82 Hz) is hard to hear on phone speakers — boost monitor + 2× harmonic. */
+  static #monitorLevelForFrequency(frequency) {
+    if (frequency < 95) {
+      return 0.28;
+    }
+    if (frequency < 130) {
+      return 0.18;
+    }
+    return 0.12;
+  }
+
+  /**
+   * @param {OscillatorNode} harmonicOsc
+   * @param {GainNode} harmonicGain
+   * @param {number} fundamentalHz
+   */
+  static #syncHarmonicMonitor(harmonicOsc, harmonicGain, fundamentalHz) {
+    if (fundamentalHz < 130) {
+      harmonicOsc.frequency.value = fundamentalHz * 2;
+      harmonicGain.gain.value = fundamentalHz < 95 ? 0.35 : 0.18;
+    } else {
+      harmonicGain.gain.value = 0;
+    }
   }
 
   stop() {
@@ -138,11 +183,22 @@ export class AudioEngine {
       }
       this.#oscillator.disconnect();
     }
+    if (this.#harmonicOsc) {
+      try {
+        this.#harmonicOsc.stop();
+      } catch {
+        /* already stopped */
+      }
+      this.#harmonicOsc.disconnect();
+    }
+    this.#harmonicGain?.disconnect();
     this.#simGain?.disconnect();
     this.#monitorGain?.disconnect();
     this.#oscillator = null;
     this.#simGain = null;
     this.#monitorGain = null;
+    this.#harmonicOsc = null;
+    this.#harmonicGain = null;
     this.#simulateMode = false;
 
     this.#source?.disconnect();

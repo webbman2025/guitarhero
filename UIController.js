@@ -34,6 +34,9 @@ const NEEDLE_PIVOT_Y = 168;
 const GAUGE_RADIUS = 147;
 const MIC_GRANTED_STORAGE_KEY = "guitar_tuner_mic_granted";
 
+/** Sim/demo: repeated taps on the same string move toward in tune. */
+const SIM_TAP_CENTS = [-18, -10, -4, 0];
+
 export class UIController {
   /** @type {AudioEngine} */
   #engine = new AudioEngine();
@@ -59,6 +62,10 @@ export class UIController {
   #resumeAfterBackground = false;
   /** @type {boolean} */
   #devDemoActive = false;
+  /** @type {string | null} */
+  #lastSimTapStringId = null;
+  /** @type {number} */
+  #simTapPhaseIndex = 0;
 
   /**
    * @param {{
@@ -532,14 +539,30 @@ export class UIController {
     }
 
     this.#devDemoActive = true;
-    this.#devSimCents = 0;
-    this.dom.devSimCents.value = "0";
-    this.dom.devSimCentsOut.textContent = "0";
+    this.#lastSimTapStringId = null;
+    this.#simTapPhaseIndex = 0;
     this.#syncDevDemoBtn();
     this.#closeDevMenu();
     void this.#onStringButtonTap(this.#selectedStringId);
     this.dom.devReadout.textContent =
-      "Demo — tap E A D G B E below.\nYou should hear each open string tone; needle centers at 0¢.\nUse Sim detune slider to test flat/sharp.";
+      "Demo — tap a string repeatedly: flat → closer → PERFECT (4 taps).\nSwitch strings to start flat again.";
+  }
+
+  /** @param {string | null} stringId */
+  #applySimTapPhase(stringId) {
+    if (this.#lastSimTapStringId === stringId) {
+      if (this.#simTapPhaseIndex >= SIM_TAP_CENTS.length - 1) {
+        this.#simTapPhaseIndex = 0;
+      } else {
+        this.#simTapPhaseIndex += 1;
+      }
+    } else {
+      this.#lastSimTapStringId = stringId;
+      this.#simTapPhaseIndex = 0;
+    }
+    this.#devSimCents = SIM_TAP_CENTS[this.#simTapPhaseIndex];
+    this.dom.devSimCents.value = String(this.#devSimCents);
+    this.dom.devSimCentsOut.textContent = String(this.#devSimCents);
   }
 
   /** @param {string | null} stringId */
@@ -548,15 +571,13 @@ export class UIController {
       return;
     }
 
-    if (this.#devSimulate || this.#devDemoActive) {
-      this.#devSimCents = 0;
-      this.dom.devSimCents.value = "0";
-      this.dom.devSimCentsOut.textContent = "0";
-    }
-
     this.#selectedStringId = stringId;
     this.#manualString = true;
     this.#setActiveStringButton(stringId);
+
+    if (this.#devSimulate || this.#devDemoActive) {
+      this.#applySimTapPhase(stringId);
+    }
 
     if (this.#devSimulate && !this.#engine.isRunning) {
       if (!(await this.#tryStartTuner())) {
@@ -566,11 +587,18 @@ export class UIController {
 
     this.#applySimFrequency();
 
-    if (this.#devOpen && this.#devSimulate) {
+    if (this.#devOpen && (this.#devSimulate || this.#devDemoActive)) {
       const s = GUITAR_STRINGS.find((g) => g.id === stringId);
       if (s) {
+        const cents = this.#devSimCents;
+        const tapsLeft = SIM_TAP_CENTS.length - 1 - this.#simTapPhaseIndex;
+        const hint =
+          cents === 0
+            ? "PERFECT — tap again to practice from flat"
+            : `${tapsLeft} more tap${tapsLeft === 1 ? "" : "s"} on this string for PERFECT`;
         this.dom.devReadout.textContent =
-          `Simulating ${s.letter} (${s.id})\n${s.hz.toFixed(2)} Hz — listen & watch needle`;
+          `${s.letter} (${s.id}) · ${s.hz.toFixed(1)} Hz\n` +
+          `Sim: ${cents > 0 ? "+" : ""}${cents}¢ — ${hint}`;
       }
     }
   }
