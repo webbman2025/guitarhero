@@ -63,7 +63,7 @@ export class UIController {
    *   stopBtn: HTMLButtonElement,
    *   devToggle: HTMLButtonElement,
    *   devPanel: HTMLElement,
-   *   devSimulate: HTMLInputElement,
+   *   devSimulateBtn: HTMLButtonElement,
    *   devSimCents: HTMLInputElement,
    *   modeButtons: HTMLButtonElement[],
    *   devSimCentsOut: HTMLOutputElement,
@@ -81,6 +81,7 @@ export class UIController {
     this.dom = dom;
     this.#buildGaugeTicks(dom.ticksGroup);
     this.#setSevenSegLetter("G", true);
+    document.body.classList.add("mode-guitar");
     this.#bindEvents();
   }
 
@@ -88,13 +89,15 @@ export class UIController {
     this.dom.devToggle.addEventListener("click", () => {
       this.#devOpen = !this.#devOpen;
       this.dom.devPanel.hidden = !this.#devOpen;
+      document.body.classList.toggle("dev-open", this.#devOpen);
       this.dom.devToggle.classList.toggle("dev-toggle--open", this.#devOpen);
       this.dom.devToggle.setAttribute("aria-expanded", String(this.#devOpen));
-      this.#updateDevReadout("Dev panel open");
+      this.#updateDevReadout(this.#devOpen ? "Dev panel open" : "Dev panel closed");
     });
 
-    this.dom.devSimulate.addEventListener("change", () => {
-      this.#devSimulate = this.dom.devSimulate.checked;
+    this.dom.devSimulateBtn.addEventListener("click", () => {
+      const enabled = this.dom.devSimulateBtn.getAttribute("aria-pressed") !== "true";
+      this.#setSimulateEnabled(enabled);
       if (this.#engine.isRunning) {
         void this.#restartAudio();
       }
@@ -148,7 +151,6 @@ export class UIController {
   async #onStartTap() {
     try {
       this.#manualString = false;
-      this.#devSimulate = this.dom.devSimulate.checked;
       await this.#engine.start({
         simulate: this.#devSimulate,
         frequency: this.#simFrequencyForSelectedString(),
@@ -261,13 +263,22 @@ export class UIController {
     return this.#tuningMode === "voice" && !this.#engine.simulateMode;
   }
 
+  /** @param {boolean} enabled */
+  #setSimulateEnabled(enabled) {
+    this.#devSimulate = enabled;
+    this.dom.devSimulateBtn.setAttribute("aria-pressed", String(enabled));
+    this.dom.devSimulateBtn.classList.toggle("dev-panel__btn--active", enabled);
+  }
+
   /** @param {"guitar" | "voice"} mode */
   #setTuningMode(mode) {
     this.#tuningMode = mode;
     this.dom.appMain.classList.toggle("tuner--guitar", mode === "guitar");
     this.dom.appMain.classList.toggle("tuner--voice", mode === "voice");
+    document.body.classList.toggle("mode-guitar", mode === "guitar");
+    document.body.classList.toggle("mode-voice", mode === "voice");
     for (const btn of this.dom.modeButtons) {
-      btn.classList.toggle("tuner__mode--active", btn.getAttribute("data-mode") === mode);
+      btn.classList.toggle("dev-panel__btn--active", btn.getAttribute("data-mode") === mode);
     }
     this.#clearLivePitch("");
     if (mode === "guitar") {
@@ -420,7 +431,13 @@ export class UIController {
   /** @param {string} stringId */
   #setActiveStringButton(stringId) {
     for (const btn of this.dom.stringButtons) {
-      btn.classList.toggle("tuner__string--active", btn.getAttribute("data-string") === stringId);
+      const active = btn.getAttribute("data-string") === stringId;
+      if (btn.classList.contains("tuner__string")) {
+        btn.classList.toggle("tuner__string--active", active);
+      }
+      if (btn.classList.contains("dev-panel__string")) {
+        btn.classList.toggle("dev-panel__string--active", active);
+      }
     }
   }
 
@@ -453,9 +470,9 @@ const appMain = document.getElementById("app-main");
 const stopBtn = document.getElementById("stop-btn");
 const devToggle = document.getElementById("dev-toggle");
 const devPanel = document.getElementById("dev-panel");
-const devSimulate = document.getElementById("dev-simulate");
+const devSimulateBtn = document.getElementById("dev-simulate-btn");
 const devSimCents = document.getElementById("dev-sim-cents");
-const modeButtons = [...document.querySelectorAll(".tuner__mode")];
+const modeButtons = [...document.querySelectorAll(".dev-panel__btn[data-mode]")];
 const devSimCentsOut = document.getElementById("dev-sim-cents-out");
 const devReadout = document.getElementById("dev-readout");
 const noteDisplay = document.getElementById("seven-seg");
@@ -463,7 +480,10 @@ const centsLabel = document.getElementById("cents-label");
 const statusLabel = document.getElementById("status-label");
 const needleWrap = document.getElementById("needle-wrap");
 const ticksGroup = document.getElementById("gauge-ticks");
-const stringButtons = [...document.querySelectorAll(".tuner__string")];
+const stringButtons = [
+  ...document.querySelectorAll(".tuner__string"),
+  ...document.querySelectorAll(".dev-panel__string"),
+];
 const segElements = [...document.querySelectorAll(".seven-seg__seg")];
 
 if (
@@ -473,7 +493,7 @@ if (
   !(stopBtn instanceof HTMLButtonElement) ||
   !(devToggle instanceof HTMLButtonElement) ||
   !(devPanel instanceof HTMLElement) ||
-  !(devSimulate instanceof HTMLInputElement) ||
+  !(devSimulateBtn instanceof HTMLButtonElement) ||
   !(devSimCents instanceof HTMLInputElement) ||
   !modeButtons.every((b) => b instanceof HTMLButtonElement) ||
   !(devSimCentsOut instanceof HTMLOutputElement) ||
@@ -496,7 +516,7 @@ new UIController({
   stopBtn,
   devToggle,
   devPanel,
-  devSimulate,
+  devSimulateBtn,
   devSimCents,
   modeButtons,
   devSimCentsOut,
