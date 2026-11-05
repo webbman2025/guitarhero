@@ -34,6 +34,16 @@ const NEEDLE_PIVOT_Y = 168;
 const GAUGE_RADIUS = 147;
 const MIC_GRANTED_STORAGE_KEY = "guitar_tuner_mic_granted";
 
+/** Automated flat → in tune → sharp cycle for dev (simulate mode). */
+const DEV_DEMO_STEPS = [
+  { cents: -18, holdMs: 2200 },
+  { cents: -7, holdMs: 1400 },
+  { cents: -2, holdMs: 1200 },
+  { cents: 0, holdMs: 2800 },
+  { cents: 11, holdMs: 2000 },
+  { cents: 0, holdMs: 2400 },
+];
+
 export class UIController {
   /** @type {AudioEngine} */
   #engine = new AudioEngine();
@@ -57,6 +67,14 @@ export class UIController {
   #devSimCents = 0;
   /** @type {boolean} */
   #resumeAfterBackground = false;
+  /** @type {boolean} */
+  #devDemoActive = false;
+  /** @type {number} */
+  #devDemoTimer = 0;
+  /** @type {number} */
+  #devDemoStepIndex = 0;
+  /** @type {number} */
+  #devDemoStringIndex = 0;
 
   /**
    * @param {{
@@ -72,6 +90,7 @@ export class UIController {
    *   devCurrentMode: HTMLElement,
    *   devExtra: HTMLElement,
    *   devSimulateBtn: HTMLButtonElement,
+   *   devDemoBtn: HTMLButtonElement,
    *   devSimCents: HTMLInputElement,
    *   modeButtons: HTMLButtonElement[],
    *   devSimCentsOut: HTMLOutputElement,
@@ -113,10 +132,17 @@ export class UIController {
 
     this.dom.devSimulateBtn.addEventListener("click", () => {
       const enabled = this.dom.devSimulateBtn.getAttribute("aria-pressed") !== "true";
+      if (!enabled) {
+        this.#stopDevDemo();
+      }
       this.#setSimulateEnabled(enabled);
       if (this.#engine.isRunning) {
         void this.#restartAudio();
       }
+    });
+
+    this.dom.devDemoBtn.addEventListener("click", () => {
+      void this.#toggleDevDemo();
     });
 
     for (const btn of this.dom.modeButtons) {
@@ -129,6 +155,9 @@ export class UIController {
     }
 
     this.dom.devSimCents.addEventListener("input", () => {
+      if (this.#devDemoActive) {
+        this.#stopDevDemo();
+      }
       this.#devSimCents = Number(this.dom.devSimCents.value);
       this.dom.devSimCentsOut.textContent = String(this.#devSimCents);
       this.#applySimFrequency();
@@ -386,6 +415,7 @@ export class UIController {
   }
 
   #shutdown() {
+    this.#stopDevDemo();
     this.#resumeAfterBackground = false;
     this.#engine.stop();
     cancelAnimationFrame(this.#rafId);
@@ -413,7 +443,7 @@ export class UIController {
       if (buffer) {
         const voiceMode = this.#isVoiceMode();
         const result = this.#engine.detectPitch(buffer, { relaxGates: voiceMode });
-        if (this.#devOpen) {
+        if (this.#devOpen && !this.#devDemoActive) {
           this.#updateDevReadoutFromResult(result, buffer);
         }
 
@@ -479,12 +509,87 @@ export class UIController {
 
   /** @param {boolean} enabled */
   #setSimulateEnabled(enabled) {
+    if (!enabled) {
+      this.#stopDevDemo();
+    }
     this.#devSimulate = enabled;
     this.dom.devSimulateBtn.setAttribute("aria-pressed", String(enabled));
     this.dom.devExtra.hidden = !enabled;
     if (!this.dom.appMain.classList.contains("tuner--live")) {
       void this.#syncStartOverlayCopy();
     }
+  }
+
+  #syncDevDemoBtn() {
+    this.dom.devDemoBtn.setAttribute("aria-pressed", String(this.#devDemoActive));
+    this.dom.devDemoBtn.textContent = this.#devDemoActive ? "Stop tuner demo" : "Play tuner demo";
+    this.dom.devDemoBtn.classList.toggle("dev-menu__item--active", this.#devDemoActive);
+  }
+
+  #stopDevDemo() {
+    if (this.#devDemoTimer) {
+      window.clearTimeout(this.#devDemoTimer);
+      this.#devDemoTimer = 0;
+    }
+    this.#devDemoActive = false;
+    this.#syncDevDemoBtn();
+  }
+
+  async #toggleDevDemo() {
+    if (this.#devDemoActive) {
+      this.#stopDevDemo();
+      return;
+    }
+
+    this.#setTuningMode("guitar");
+    this.#setSimulateEnabled(true);
+    if (!this.dom.appMain.classList.contains("tuner--live")) {
+      if (!(await this.#tryStartTuner())) {
+        this.dom.devReadout.textContent = "Demo needs audio — tap Start on the main screen, then try again.";
+        return;
+      }
+    } else {
+      await this.#restartAudio();
+    }
+
+    this.#devDemoActive = true;
+    this.#devDemoStepIndex = 0;
+    this.#devDemoStringIndex = 0;
+    this.#syncDevDemoBtn();
+    this.#closeDevMenu();
+    this.#applyDevDemoStep();
+  }
+
+  #applyDevDemoStep() {
+    if (!this.#devDemoActive) {
+      return;
+    }
+
+    const string = GUITAR_STRINGS[this.#devDemoStringIndex];
+    const step = DEV_DEMO_STEPS[this.#devDemoStepIndex];
+
+    this.#selectedStringId = string.id;
+    this.#manualString = true;
+    this.#setActiveStringButton(string.id);
+    this.#devSimCents = step.cents;
+    this.dom.devSimCents.value = String(step.cents);
+    this.dom.devSimCentsOut.textContent = String(step.cents);
+    this.#applySimFrequency();
+
+    const phase =
+      step.cents === 0 ? "in tune (expect green + PERFECT)" : step.cents > 0 ? "sharp" : "flat";
+    this.dom.devReadout.textContent =
+      `Demo — ${string.letter} string (${string.hz.toFixed(1)} Hz)\n` +
+      `Sim offset: ${step.cents > 0 ? "+" : ""}${step.cents}¢ (${phase})`;
+
+    this.#devDemoTimer = window.setTimeout(() => {
+      this.#devDemoStepIndex += 1;
+      if (this.#devDemoStepIndex >= DEV_DEMO_STEPS.length) {
+        this.#devDemoStepIndex = 0;
+        this.#devDemoStringIndex = (this.#devDemoStringIndex + 1) % GUITAR_STRINGS.length;
+      }
+      this.#applyDevDemoStep();
+    }, step.holdMs);
   }
 
   /** @param {"guitar" | "voice"} mode */
@@ -710,6 +815,7 @@ const devDoneBtn = document.getElementById("dev-done-btn");
 const devCurrentMode = document.getElementById("dev-current-mode");
 const devExtra = document.getElementById("dev-extra");
 const devSimulateBtn = document.getElementById("dev-simulate-btn");
+const devDemoBtn = document.getElementById("dev-demo-btn");
 const devSimCents = document.getElementById("dev-sim-cents");
 const modeButtons = [...document.querySelectorAll(".dev-menu__item[data-mode]")];
 const devSimCentsOut = document.getElementById("dev-sim-cents-out");
@@ -735,6 +841,7 @@ if (
   !(devCurrentMode instanceof HTMLElement) ||
   !(devExtra instanceof HTMLElement) ||
   !(devSimulateBtn instanceof HTMLButtonElement) ||
+  !(devDemoBtn instanceof HTMLButtonElement) ||
   !(devSimCents instanceof HTMLInputElement) ||
   !modeButtons.every((b) => b instanceof HTMLButtonElement) ||
   !(devSimCentsOut instanceof HTMLOutputElement) ||
@@ -763,6 +870,7 @@ new UIController({
   devCurrentMode,
   devExtra,
   devSimulateBtn,
+  devDemoBtn,
   devSimCents,
   modeButtons,
   devSimCentsOut,
