@@ -43,9 +43,9 @@ export class UIController {
   /** @type {number} */
   #rafId = 0;
   /** @type {number} */
-  #needleTargetDeg = 0;
+  #needleTargetDeg = NEEDLE_MIN;
   /** @type {number} */
-  #needleDeg = 0;
+  #needleDeg = NEEDLE_MIN;
   /** @type {string} */
   #selectedStringId = "G3";
   /** @type {boolean} */
@@ -98,6 +98,7 @@ export class UIController {
   constructor(dom) {
     this.dom = dom;
     this.#buildGaugeTicks(dom.ticksGroup);
+    this.#setNeedleTransform(NEEDLE_MIN);
     this.#hideNoteDisplay();
     document.body.classList.add("mode-guitar");
     this.#bindEvents();
@@ -405,12 +406,9 @@ export class UIController {
     this.#engine.stop();
     cancelAnimationFrame(this.#rafId);
     this.#rafId = 0;
-    this.#needleTargetDeg = 0;
-    this.#needleDeg = 0;
-    this.dom.needleWrap.setAttribute(
-      "transform",
-      `rotate(0 ${NEEDLE_PIVOT_X} ${NEEDLE_PIVOT_Y})`,
-    );
+    this.#needleTargetDeg = NEEDLE_MIN;
+    this.#needleDeg = NEEDLE_MIN;
+    this.#setNeedleTransform(NEEDLE_MIN);
     this.#clearLivePitch("");
     this.dom.overlay.classList.remove("start-overlay--hidden");
     this.dom.appMain.setAttribute("aria-hidden", "true");
@@ -472,7 +470,7 @@ export class UIController {
 
   /** Reset needle to center and clear live pitch readout. */
   #clearLivePitch(statusText) {
-    this.#needleTargetDeg = 0;
+    this.#needleTargetDeg = NEEDLE_MIN;
     this.dom.statusLabel.textContent = statusText;
     this.dom.centsLabel.textContent = "—";
     this.dom.centsLabel.classList.remove("tuner__cents--perfect");
@@ -680,10 +678,7 @@ export class UIController {
     const allowPerfect = options.allowPerfect !== false;
     this.#needleTargetDeg = UIController.#centsToNeedleDegrees(cents);
     this.#needleDeg = this.#needleTargetDeg;
-    this.dom.needleWrap.setAttribute(
-      "transform",
-      `rotate(${this.#needleDeg.toFixed(2)} ${NEEDLE_PIVOT_X} ${NEEDLE_PIVOT_Y})`,
-    );
+    this.#setNeedleTransform(this.#needleDeg);
 
     const inTune = Math.abs(cents) <= IN_TUNE_CENTS;
     const showPerfect = allowPerfect && inTune;
@@ -702,6 +697,14 @@ export class UIController {
     this.dom.centsLabel.classList.toggle("tuner__cents--perfect", showPerfect);
     this.dom.centsLabel.textContent = showPerfect ? "Perfect" : `${sign}${rounded}¢`;
     this.#setPerfectFeedback(showPerfect);
+  }
+
+  /** @param {number} degrees */
+  #setNeedleTransform(degrees) {
+    this.dom.needleWrap.setAttribute(
+      "transform",
+      `rotate(${degrees.toFixed(2)} ${NEEDLE_PIVOT_X} ${NEEDLE_PIVOT_Y})`,
+    );
   }
 
   /**
@@ -833,10 +836,7 @@ export class UIController {
     if (!this.#engine.simulateMode) {
       this.#needleDeg += (this.#needleTargetDeg - this.#needleDeg) * 0.22;
     }
-    this.dom.needleWrap.setAttribute(
-      "transform",
-      `rotate(${this.#needleDeg.toFixed(2)} ${NEEDLE_PIVOT_X} ${NEEDLE_PIVOT_Y})`,
-    );
+    this.#setNeedleTransform(this.#needleDeg);
   }
 
   /** @param {string} stringId */
