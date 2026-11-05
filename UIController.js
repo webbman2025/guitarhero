@@ -66,6 +66,8 @@ export class UIController {
   #lastSimTapStringId = null;
   /** @type {number} */
   #simTapPhaseIndex = 0;
+  /** @type {boolean} */
+  #simStringEngaged = false;
 
   /**
    * @param {{
@@ -150,6 +152,7 @@ export class UIController {
       if (this.#devDemoActive) {
         this.#stopDevDemo();
       }
+      this.#simStringEngaged = true;
       this.#devSimCents = Number(this.dom.devSimCents.value);
       this.dom.devSimCentsOut.textContent = String(this.#devSimCents);
       this.#applySimFrequency();
@@ -416,7 +419,7 @@ export class UIController {
     this.dom.stopBtn.hidden = true;
     this.#revealStartOverlay();
     void this.#syncStartOverlayCopy();
-    this.#setPerfectFeedback(false);
+    this.#setTuneVisualState("neutral");
     this.#hideNoteDisplay();
   }
 
@@ -426,14 +429,18 @@ export class UIController {
       const simMode = this.#engine.simulateMode;
 
       if (simMode && !voiceMode) {
-        const target =
-          GUITAR_STRINGS.find((s) => s.id === this.#selectedStringId) ?? GUITAR_STRINGS[3];
-        this.#applyTuningFromCents(target, this.#devSimCents, { allowPerfect: true });
-        if (this.#devOpen) {
-          const freq = this.#simFrequencyForSelectedString();
-          this.dom.devReadout.textContent =
-            `Demo · ${target.letter} (${target.id})\n` +
-            `${freq.toFixed(2)} Hz · needle at ${this.#devSimCents > 0 ? "+" : ""}${this.#devSimCents}¢`;
+        if (!this.#simStringEngaged) {
+          this.#showIdleNeedle();
+        } else {
+          const target =
+            GUITAR_STRINGS.find((s) => s.id === this.#selectedStringId) ?? GUITAR_STRINGS[3];
+          this.#applyTuningFromCents(target, this.#devSimCents, { allowPerfect: true });
+          if (this.#devOpen) {
+            const freq = this.#simFrequencyForSelectedString();
+            this.dom.devReadout.textContent =
+              `Demo · ${target.letter} (${target.id})\n` +
+              `${freq.toFixed(2)} Hz · needle at ${this.#devSimCents > 0 ? "+" : ""}${this.#devSimCents}¢`;
+          }
         }
       } else {
         const buffer = this.#engine.readTimeDomainBuffer();
@@ -469,12 +476,35 @@ export class UIController {
   }
 
   /** Reset needle to center and clear live pitch readout. */
+  #showIdleNeedle() {
+    this.#needleTargetDeg = NEEDLE_MIN;
+    this.#needleDeg = NEEDLE_MIN;
+    this.#setNeedleTransform(NEEDLE_MIN);
+    this.dom.statusLabel.textContent = "";
+    this.dom.centsLabel.textContent = "—";
+    this.dom.centsLabel.classList.remove("tuner__cents--perfect");
+    this.#setTuneVisualState("neutral");
+    this.#hideNoteDisplay();
+  }
+
+  #resetSimNeedleIdle() {
+    this.#simStringEngaged = false;
+    this.#lastSimTapStringId = null;
+    this.#simTapPhaseIndex = 0;
+    this.#devSimCents = 0;
+    this.dom.devSimCents.value = "0";
+    this.dom.devSimCentsOut.textContent = "0";
+    this.#showIdleNeedle();
+  }
+
   #clearLivePitch(statusText) {
     this.#needleTargetDeg = NEEDLE_MIN;
+    this.#needleDeg = NEEDLE_MIN;
+    this.#setNeedleTransform(NEEDLE_MIN);
     this.dom.statusLabel.textContent = statusText;
     this.dom.centsLabel.textContent = "—";
     this.dom.centsLabel.classList.remove("tuner__cents--perfect");
-    this.#setPerfectFeedback(false);
+    this.#setTuneVisualState("neutral");
     this.#hideNoteDisplay();
   }
 
@@ -510,6 +540,9 @@ export class UIController {
   #setSimulateEnabled(enabled) {
     if (!enabled) {
       this.#stopDevDemo();
+      this.#resetSimNeedleIdle();
+    } else {
+      this.#resetSimNeedleIdle();
     }
     this.#devSimulate = enabled;
     this.dom.devSimulateBtn.setAttribute("aria-pressed", String(enabled));
@@ -529,6 +562,9 @@ export class UIController {
 
   #stopDevDemo() {
     this.#devDemoActive = false;
+    if (this.#devSimulate) {
+      this.#resetSimNeedleIdle();
+    }
     this.#syncDevDemoBtn();
   }
 
@@ -550,13 +586,11 @@ export class UIController {
     }
 
     this.#devDemoActive = true;
-    this.#lastSimTapStringId = null;
-    this.#simTapPhaseIndex = 0;
+    this.#resetSimNeedleIdle();
     this.#syncDevDemoBtn();
     this.#closeDevMenu();
-    void this.#onStringButtonTap(this.#selectedStringId);
     this.dom.devReadout.textContent =
-      "Demo — tap the same letter 3 times: flat → closer → PERFECT.\nEach string (E, A, D, G, B, E) works the same way.";
+      "Demo — needle starts at the far left.\nTap a letter 3 times: flat → closer → PERFECT.";
   }
 
   /** @param {string | null} stringId */
@@ -587,6 +621,7 @@ export class UIController {
     this.#setActiveStringButton(stringId);
 
     if (this.#devSimulate || this.#devDemoActive) {
+      this.#simStringEngaged = true;
       this.#applySimTapPhase(stringId);
     }
 
@@ -696,7 +731,7 @@ export class UIController {
     const sign = rounded > 0 ? "+" : "";
     this.dom.centsLabel.classList.toggle("tuner__cents--perfect", showPerfect);
     this.dom.centsLabel.textContent = showPerfect ? "Perfect" : `${sign}${rounded}¢`;
-    this.#setPerfectFeedback(showPerfect);
+    this.#setTuneVisualState(showPerfect ? "perfect" : "out");
   }
 
   /** @param {number} degrees */
@@ -741,7 +776,7 @@ export class UIController {
     const sign = rounded > 0 ? "+" : "";
     this.dom.centsLabel.classList.toggle("tuner__cents--perfect", showPerfect);
     this.dom.centsLabel.textContent = showPerfect ? "Perfect" : `${sign}${rounded}¢`;
-    this.#setPerfectFeedback(showPerfect);
+    this.#setTuneVisualState(showPerfect ? "perfect" : "out");
   }
 
   /**
@@ -776,13 +811,16 @@ export class UIController {
       this.dom.statusLabel.textContent = `${frequency.toFixed(1)} Hz · ${noteName}${octave}`;
       this.dom.centsLabel.textContent = `${sign}${rounded}¢`;
     }
-    this.#setPerfectFeedback(showPerfect);
+    this.#setTuneVisualState(showPerfect ? "perfect" : "out");
   }
 
-  /** Full-screen + gauge feedback when pitch is within ±IN_TUNE_CENTS. */
-  #setPerfectFeedback(perfect) {
+  /** @param {"neutral" | "perfect" | "out"} state */
+  #setTuneVisualState(state) {
+    const perfect = state === "perfect";
+    const out = state === "out";
     document.body.classList.toggle("perfect-tune", perfect);
     this.dom.appMain.classList.toggle("tuner--perfect", perfect);
+    this.dom.appMain.classList.toggle("tuner--out-of-tune", out);
   }
 
   #hideNoteDisplay() {

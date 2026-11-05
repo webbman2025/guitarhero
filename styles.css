@@ -5,6 +5,7 @@
   --color-marker: #ffffff;
   --color-in-tune: #9dffb8;
   --color-bg-in-tune: #0d7a45;
+  --color-out-of-tune: #ffb3b3;
   --gauge-pivot-x: 195;
   --gauge-pivot-y: 168;
   --safe-top: env(safe-area-inset-top, 0px);
@@ -341,6 +342,16 @@ html.mic-granted-boot .start-overlay {
   fill: var(--color-in-tune);
 }
 
+.tuner--out-of-tune .gauge__needle {
+  fill: var(--color-out-of-tune);
+  opacity: 1;
+}
+
+.tuner--out-of-tune .gauge__marker,
+.tuner--out-of-tune .gauge__pivot {
+  fill: var(--color-out-of-tune);
+}
+
 .gauge__pivot {
   fill: var(--color-marker);
   opacity: 0.9;
@@ -362,6 +373,15 @@ html.mic-granted-boot .start-overlay {
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+}
+
+.tuner--out-of-tune .tuner__cents:not(.tuner__cents--perfect) {
+  color: var(--color-out-of-tune);
+  font-weight: 600;
+}
+
+.tuner--out-of-tune .tuner__status {
+  color: var(--color-out-of-tune);
 }
 
 .tuner__display {
@@ -397,6 +417,11 @@ html.mic-granted-boot .start-overlay {
 .seven-seg--in-tune .seven-seg__seg.seven-seg__seg--on {
   opacity: 1;
   fill: var(--color-in-tune);
+}
+
+.tuner--out-of-tune .seven-seg--active .seven-seg__seg.seven-seg__seg--on {
+  opacity: 1;
+  fill: var(--color-out-of-tune);
 }
 
 .tuner__status {
